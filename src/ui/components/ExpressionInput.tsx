@@ -7,12 +7,14 @@ interface ExpressionInputProps {
   onChange: (value: string) => void;
   onParsed: (cards: ExpressionCard[]) => void;
   onTriggerUpdate: () => void;
+  figmaCardIds?: { cardId: string; korean: string }[];
 }
 
 const PLACEHOLDER = `Enter expressions separated by blank lines.
 
 Single enter = line break within card
 Double enter = new card
+Triple enter = new row
 
 Example:
 고양이
@@ -22,8 +24,8 @@ Example:
 
 하얀색 = 흰색`;
 
-const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onParsed, onTriggerUpdate }) => {
-  const { cards, cardCount } = useExpressionParser(value);
+const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onParsed, onTriggerUpdate, figmaCardIds }) => {
+  const { cards, cardCount } = useExpressionParser(value, figmaCardIds);
 
   // Sync parsed cards to parent
   React.useEffect(() => {
@@ -62,7 +64,7 @@ const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onPa
       </div>
       {cardCount > 32 && (
         <div className="error-banner" style={{ marginTop: 8 }}>
-          Warning: More than 32 cards. Some cards may not fit in the spread layout (max 4x4 per half-page x 2 pages = 32 cells).
+          Warning: More than 32 cards. Some cards may not fit in the spread layout (4 visual cols x 4 visual rows x 2 pages = 32 cards).
         </div>
       )}
     </div>

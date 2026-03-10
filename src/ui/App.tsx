@@ -9,6 +9,7 @@ import type {
 import {
   DEFAULT_BG_COLOR,
   DEFAULT_FONT_SIZE,
+  CARD_EN_PLACEHOLDER,
 } from '../shared/constants';
 import ExpressionInput from './components/ExpressionInput';
 import SettingsPanel from './components/SettingsPanel';
@@ -38,9 +39,19 @@ const App: React.FC = () => {
   const [generatedImages, setGeneratedImages] = useState<Map<string, ImageMeta[]>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [activeFrameId, setActiveFrameId] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  // English translations map: cardId → enLines
+  const [enLinesMap, setEnLinesMap] = useState<Map<string, string[]>>(new Map());
+
+  // Figma-sourced card IDs: ensures parser uses IDs matching the canvas
+  const [figmaCardIds, setFigmaCardIds] = useState<{ cardId: string; korean: string }[] | undefined>();
 
   // Gemini API hook
   const gemini = useGeminiApi();
+
+  // Pending English texts from frame selection (applied after parsing)
+  const pendingEnTextsRef = useRef<{ cardId: string; korean: string; en: string }[] | null>(null);
 
   // Load saved API key on startup
   useEffect(() => {
@@ -56,25 +67,61 @@ const App: React.FC = () => {
     }
   }, [settings.apiKey]);
 
-  // Ref to track latest parsed cards for live updates
+  // Apply pending enTextPairs from frame selection to enLinesMap
+  // (Card ID sync is handled by the parser via figmaCardIds)
+  useEffect(() => {
+    if (pendingEnTextsRef.current && parsedCards.length > 0) {
+      const pairs = pendingEnTextsRef.current;
+      pendingEnTextsRef.current = null;
+
+      // Build enLinesMap using Figma-sourced cardIds
+      const newMap = new Map<string, string[]>();
+      for (const pair of pairs) {
+        if (pair.en && pair.en !== CARD_EN_PLACEHOLDER) {
+          newMap.set(pair.cardId, [pair.en]);
+        }
+      }
+      setEnLinesMap(newMap);
+    }
+  }, [parsedCards]);
+
+  // Ref to track latest parsed cards and enLines for live updates
   const parsedCardsRef = useRef<ExpressionCard[]>([]);
+  const enLinesMapRef = useRef<Map<string, string[]>>(new Map());
   useEffect(() => {
     parsedCardsRef.current = parsedCards;
   }, [parsedCards]);
+  useEffect(() => {
+    enLinesMapRef.current = enLinesMap;
+  }, [enLinesMap]);
 
-  // Live update: send UPDATE_LAYOUT on spacebar / double-enter triggers
+  // Merge enLines into cards before sending to plugin
+  const mergeEnLines = useCallback((cards: ExpressionCard[]): ExpressionCard[] => {
+    const map = enLinesMapRef.current;
+    return cards.map(card => ({
+      ...card,
+      enLines: map.get(card.id),
+    }));
+  }, []);
+
+  // Live update: debounced to prevent race conditions from rapid input
+  const liveUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleLiveUpdate = useCallback(() => {
-    // Small delay to ensure state is updated after the keystroke
-    setTimeout(() => {
+    if (liveUpdateTimerRef.current) {
+      clearTimeout(liveUpdateTimerRef.current);
+    }
+    liveUpdateTimerRef.current = setTimeout(() => {
+      liveUpdateTimerRef.current = null;
       const cards = parsedCardsRef.current;
       if (cards.length === 0) return;
       postToPlugin({
         type: 'UPDATE_LAYOUT',
-        expressions: cards,
+        expressions: mergeEnLines(cards),
         settings,
+        frameId: activeFrameId || undefined,
       });
-    }, 50);
-  }, [settings]);
+    }, 400);
+  }, [settings, activeFrameId, mergeEnLines]);
 
   // Handle messages from the sandbox
   const handlePluginMessage = useCallback((msg: SandboxToUIMessage) => {
@@ -82,14 +129,15 @@ const App: React.FC = () => {
       case 'LAYOUT_CREATED':
         setPlacements(msg.placements);
         setIsGeneratingLayout(false);
+        setActiveFrameId(msg.frameId);
         // Update parsedCards with actual colSpan/rowSpan from sandbox measurement
         setParsedCards(prev => prev.map(card => {
           var placement = msg.placements.find(function(p) { return p.id === card.id; });
           if (placement) {
             return {
               ...card,
-              colSpan: placement.colSpan as 1 | 2,
-              rowSpan: placement.rowSpan as 1 | 2,
+              colSpan: placement.colSpan,
+              rowSpan: placement.rowSpan,
             };
           }
           return card;
@@ -102,6 +150,7 @@ const App: React.FC = () => {
 
       case 'IMAGE_STORED': {
         const isFirstVariant = msg.index === 0;
+        const thumbBase64 = gemini.getImageBase64(msg.expressionId, msg.index);
         setGeneratedImages((prev) => {
           const next = new Map(prev);
           const existing = next.get(msg.expressionId) || [];
@@ -111,6 +160,7 @@ const App: React.FC = () => {
             prompt: '',
             isActive: isFirstVariant,
             index: msg.index,
+            imageBase64: thumbBase64,
           };
           next.set(msg.expressionId, [...existing, meta]);
           return next;
@@ -121,6 +171,7 @@ const App: React.FC = () => {
             type: 'ASSIGN_IMAGE',
             expressionId: msg.expressionId,
             imageHash: msg.imageHash,
+            frameId: activeFrameId || undefined,
           });
         }
         break;
@@ -157,7 +208,15 @@ const App: React.FC = () => {
       case 'FRAME_SELECTED':
         setActiveFrameId(msg.frameId);
         setExpressions(msg.expressionText);
-        // Clear generated images state when switching frames
+        setEnLinesMap(new Map());
+        if (msg.enTextPairs && msg.enTextPairs.length > 0) {
+          pendingEnTextsRef.current = msg.enTextPairs;
+          // Pass Figma card IDs to the parser so it assigns matching IDs
+          setFigmaCardIds(msg.enTextPairs.map(p => ({ cardId: p.cardId, korean: p.korean })));
+        } else {
+          pendingEnTextsRef.current = null;
+          setFigmaCardIds(undefined);
+        }
         setGeneratedImages(new Map());
         setPlacements([]);
         break;
@@ -168,6 +227,8 @@ const App: React.FC = () => {
         setGeneratedImages(new Map());
         setPlacements([]);
         setParsedCards([]);
+        setEnLinesMap(new Map());
+        setFigmaCardIds(undefined);
         break;
 
       case 'ERROR':
@@ -178,7 +239,7 @@ const App: React.FC = () => {
       default:
         break;
     }
-  }, []);
+  }, [gemini, activeFrameId]);
 
   usePluginMessage(handlePluginMessage);
 
@@ -191,8 +252,9 @@ const App: React.FC = () => {
     setIsGeneratingLayout(true);
     postToPlugin({
       type: 'GENERATE_LAYOUT',
-      expressions: parsedCards,
+      expressions: mergeEnLines(parsedCards),
       settings,
+      frameId: activeFrameId || undefined,
     });
   };
 
@@ -258,11 +320,80 @@ const App: React.FC = () => {
       });
     }
 
-    gemini.generateAll(settings.apiKey, cards, refImageRef.current);
+    gemini.generateAll(settings.apiKey, cards, refImageRef.current, activeFrameId || undefined);
   };
 
   const handleCancelGeneration = () => {
     gemini.cancel();
+  };
+
+  const handleTranslate = async () => {
+    if (parsedCards.length === 0) {
+      setError('No expressions to translate.');
+      return;
+    }
+    if (!settings.apiKey) {
+      setError('API key is required for translation. Set it in Settings.');
+      return;
+    }
+
+    // Filter: only cards that need translation (no enLines, or placeholder)
+    const cardsToTranslate = parsedCards.filter(card => {
+      const en = enLinesMap.get(card.id);
+      if (!en || en.length === 0) return true;
+      // Skip if already has real English text (not the placeholder)
+      return en.every(line => line === CARD_EN_PLACEHOLDER || line === '');
+    });
+
+    if (cardsToTranslate.length === 0) {
+      setError('All cards already have English translations.');
+      return;
+    }
+
+    setError(null);
+    setIsTranslating(true);
+
+    try {
+      const translateInput = cardsToTranslate.map(card => ({
+        id: card.id,
+        koreanText: card.lines.join(' '),
+      }));
+
+      const translationMap = await gemini.translate(settings.apiKey, translateInput);
+
+      // Merge translations into enLinesMap
+      setEnLinesMap(prev => {
+        const next = new Map(prev);
+        translationMap.forEach((enLines, cardId) => {
+          next.set(cardId, enLines);
+        });
+        return next;
+      });
+
+      // Trigger layout update with new translations
+      const cards = parsedCardsRef.current;
+      if (cards.length > 0) {
+        // Build updatedMap from current ref merged with new translations
+        const updatedMap = new Map(enLinesMapRef.current);
+        translationMap.forEach((enLines, cardId) => {
+          updatedMap.set(cardId, enLines);
+        });
+        const cardsWithEn = cards.map(card => ({
+          ...card,
+          enLines: updatedMap.get(card.id),
+        }));
+        postToPlugin({
+          type: 'UPDATE_LAYOUT',
+          expressions: cardsWithEn,
+          settings,
+          frameId: activeFrameId || undefined,
+        });
+      }
+    } catch (err: any) {
+      setError('Translation failed: ' + (err.message || String(err)));
+    } finally {
+      setIsTranslating(false);
+    }
   };
 
   const handleNewPage = () => {
@@ -309,6 +440,7 @@ const App: React.FC = () => {
             onChange={setExpressions}
             onParsed={setParsedCards}
             onTriggerUpdate={handleLiveUpdate}
+            figmaCardIds={figmaCardIds}
           />
         )}
         {activeTab === 'settings' && (
@@ -326,6 +458,7 @@ const App: React.FC = () => {
                 type: 'SWAP_IMAGE',
                 expressionId,
                 newImageHash: imageHash,
+                frameId: activeFrameId || undefined,
               });
               // Update active state locally
               setGeneratedImages(prev => {
@@ -344,7 +477,7 @@ const App: React.FC = () => {
               const card = parsedCards.find(c => c.id === expressionId);
               if (!card || !settings.apiKey) return;
               const existingCount = generatedImages.get(expressionId)?.length || 0;
-              gemini.generateSingle(settings.apiKey, card, customPrompt, refImageRef.current, existingCount);
+              gemini.generateSingle(settings.apiKey, card, customPrompt, refImageRef.current, existingCount, activeFrameId || undefined);
             }}
           />
         )}
@@ -430,6 +563,13 @@ const App: React.FC = () => {
           disabled={isGeneratingLayout || parsedCards.length === 0}
         >
           {isGeneratingLayout ? 'Generating...' : 'Generate Layout'}
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={handleTranslate}
+          disabled={isTranslating || parsedCards.length === 0}
+        >
+          {isTranslating ? 'Translating...' : 'Translate'}
         </button>
         <button
           className="btn btn-primary"

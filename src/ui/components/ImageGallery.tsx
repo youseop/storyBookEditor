@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { ExpressionCard, ImageMeta } from '../../shared/messageTypes';
-import ImageSwapModal from './ImageSwapModal';
 
 interface ImageGalleryProps {
   generatedImages: Map<string, ImageMeta[]>;
@@ -15,7 +14,8 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   onSwap,
   onRegen,
 }) => {
-  const [selectedExprId, setSelectedExprId] = useState<string | null>(null);
+  const [regenExprId, setRegenExprId] = useState<string | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
 
   if (generatedImages.size === 0) {
     return (
@@ -25,59 +25,90 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     );
   }
 
-  const selectedImages = selectedExprId ? generatedImages.get(selectedExprId) || [] : [];
-  const selectedCard = parsedCards.find(c => c.id === selectedExprId);
-
   return (
-    <div>
+    <div className="image-gallery">
       {parsedCards.map((card) => {
         const images = generatedImages.get(card.id) || [];
         if (images.length === 0) return null;
-        const activeImage = images.find(img => img.isActive);
+
         return (
-          <div key={card.id} className="gallery-item">
-            <div className="gallery-item-header">
-              <span className="gallery-item-label">{card.lines.join(' / ')}</span>
-              <span className="gallery-item-count">{images.length} variant{images.length !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="gallery-item-actions">
+          <div key={card.id} className="gallery-card">
+            <div className="gallery-card-header">
+              <span className="gallery-card-label">{card.lines.join(' / ')}</span>
               <button
                 className="btn btn-sm"
-                onClick={() => setSelectedExprId(card.id)}
+                onClick={() => {
+                  if (regenExprId === card.id) {
+                    setRegenExprId(null);
+                    setCustomPrompt('');
+                  } else {
+                    setRegenExprId(card.id);
+                    setCustomPrompt('');
+                  }
+                }}
               >
-                Swap
-              </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => onRegen(card.id)}
-              >
-                Regen
+                + Regen
               </button>
             </div>
-            {activeImage && (
-              <div className="gallery-active-indicator">
-                Active: variant #{activeImage.index + 1}
+
+            <div className="gallery-thumbs">
+              {images.map((img, idx) => (
+                <div
+                  key={img.imageHash}
+                  className={`gallery-thumb ${img.isActive ? 'active' : ''}`}
+                  onClick={() => onSwap(card.id, img.imageHash)}
+                  title={img.isActive ? `Variant #${idx + 1} (active)` : `Variant #${idx + 1} — click to select`}
+                >
+                  {img.imageBase64 ? (
+                    <img
+                      src={`data:image/png;base64,${img.imageBase64}`}
+                      alt={`Variant ${idx + 1}`}
+                      className="gallery-thumb-img"
+                    />
+                  ) : (
+                    <div className="gallery-thumb-placeholder">
+                      #{idx + 1}
+                    </div>
+                  )}
+                  {img.isActive && <div className="gallery-thumb-badge">Active</div>}
+                </div>
+              ))}
+            </div>
+
+            {regenExprId === card.id && (
+              <div className="gallery-regen-form">
+                <textarea
+                  value={customPrompt}
+                  onChange={e => setCustomPrompt(e.target.value)}
+                  placeholder="Custom prompt (leave empty for default)"
+                  rows={2}
+                />
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      onRegen(card.id, customPrompt || undefined);
+                      setRegenExprId(null);
+                      setCustomPrompt('');
+                    }}
+                  >
+                    Generate
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setRegenExprId(null);
+                      setCustomPrompt('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>
         );
       })}
-
-      {selectedExprId && (
-        <ImageSwapModal
-          expressionId={selectedExprId}
-          expressionLabel={selectedCard?.lines.join(' / ') || ''}
-          images={selectedImages}
-          onSwap={(imageHash) => {
-            onSwap(selectedExprId, imageHash);
-            setSelectedExprId(null);
-          }}
-          onRegen={(customPrompt) => {
-            onRegen(selectedExprId, customPrompt);
-          }}
-          onClose={() => setSelectedExprId(null)}
-        />
-      )}
     </div>
   );
 };
