@@ -8,13 +8,21 @@ import {
   HALF_PAGE_WIDTH,
   FRAME_HEIGHT,
   CARD_IMAGE_RATIO,
-  CARD_TEXT_RATIO,
+  CARD_KO_TEXT_RATIO,
   CARD_BG_COLOR,
   CARD_STROKE_COLOR,
-  CARD_STROKE_RATIO,
-  CARD_CORNER_RATIO,
+  CARD_STROKE_WEIGHT,
+  CARD_CORNER_RADIUS,
+  CARD_IMG_CORNER_RADIUS,
+  CARD_EN_TEXT_COLOR,
+  CARD_EN_FONT_SIZE,
+  CARD_EN_PLACEHOLDER,
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
+  DEFAULT_COL_SPAN,
+  DEFAULT_ROW_SPAN,
+  MAX_EXPANSION,
+  SIZING_TEXT_RATIO,
 } from '../shared/constants';
 
 // Grid vertically centered in the frame
@@ -28,16 +36,16 @@ import type {
 } from '../shared/messageTypes';
 import { hexToFigmaColor } from './frameBuilder';
 
-/**
- * Measures text for each card and determines optimal colSpan/rowSpan
- * based on whether the text overflows the available area in a 1x1 card.
- */
+// ── Phase A: Measure and size cards ──
+// Width: grow colSpan only when widest line exceeds available card width.
+// Height: measure wrapped text height against SIZING_TEXT_RATIO budget (50% of card).
+//   1-3 lines fit within default 2x2; 4+ lines grow rowSpan.
+
 async function measureAndSizeCards(
   expressions: ExpressionCard[],
   fontFamily: string,
   fontSize: number,
 ): Promise<ExpressionCard[]> {
-  // Create a temporary text node for measurement (use Bold to match card rendering)
   await figma.loadFontAsync({ family: fontFamily, style: 'Bold' });
 
   const sized: ExpressionCard[] = [];
@@ -47,32 +55,32 @@ async function measureAndSizeCards(
     textNode.fontName = { family: fontFamily, style: 'Bold' };
     textNode.fontSize = fontSize;
     textNode.characters = card.lines.join('\n');
-    // Let text auto-size (don't constrain width)
     textNode.textAutoResize = 'WIDTH_AND_HEIGHT';
 
-    const textWidth = textNode.width;
-    const textHeight = textNode.height;
+    const naturalWidth = textNode.width;
+
+    // Width: grow colSpan only when widest line is too wide
+    let colSpan = DEFAULT_COL_SPAN;
+    while (colSpan < GRID_COLS) {
+      const cardWidth = colSpan * CELL_WIDTH + (colSpan - 1) * CELL_GAP;
+      if (naturalWidth <= cardWidth - 40) break;
+      colSpan++;
+    }
+
+    // Height: constrain to final card width, measure wrapped height
+    const finalCardWidth = colSpan * CELL_WIDTH + (colSpan - 1) * CELL_GAP;
+    textNode.textAutoResize = 'HEIGHT';
+    textNode.resize(finalCardWidth - 40, textNode.height);
+    const wrappedHeight = textNode.height;
     textNode.remove();
 
-    // Available space in a 1x1 card's text area
-    const availableTextWidth = CELL_WIDTH - 40; // 40px padding
-    const availableTextHeight = Math.round(CELL_HEIGHT * CARD_TEXT_RATIO) - 20; // padding
-
-    let colSpan: 1 | 2 = 1;
-    let rowSpan: 1 | 2 = 1;
-
-    // Check horizontal overflow -> wide card (2x1)
-    if (textWidth > availableTextWidth) {
-      colSpan = 2;
+    let rowSpan = DEFAULT_ROW_SPAN;
+    while (rowSpan < GRID_ROWS) {
+      const cardHeight = rowSpan * CELL_HEIGHT + (rowSpan - 1) * CELL_GAP;
+      const textBudget = Math.round(cardHeight * SIZING_TEXT_RATIO);
+      if (wrappedHeight <= textBudget) break;
+      rowSpan++;
     }
-
-    // Check vertical overflow (many lines) -> tall card (1x2)
-    if (textHeight > availableTextHeight) {
-      rowSpan = 2;
-    }
-
-    // Both overflow -> big card (2x2)
-    // (colSpan and rowSpan already set independently)
 
     sized.push({
       ...card,
@@ -84,14 +92,79 @@ async function measureAndSizeCards(
   return sized;
 }
 
-/**
- * 2D bin-packing grid layout engine.
- *
- * Manages two 4x4 grids (page 0 = left half, page 1 = right half).
- * For each card, scans left-to-right then top-to-bottom for the first
- * position where the card's colSpan x rowSpan block fits without
- * overlapping already-placed cards.
- */
+// ── Phase B & C: Row-based placement with expansion ──
+
+interface RowEntry {
+  card: ExpressionCard;
+  colSpan: number; // final colSpan after expansion
+}
+
+interface Row {
+  entries: RowEntry[];
+  maxRowSpan: number;
+  usedCols: number;
+}
+
+function buildRows(cards: ExpressionCard[]): Row[] {
+  const rows: Row[] = [];
+  let currentRow: Row = { entries: [], maxRowSpan: 0, usedCols: 0 };
+
+  for (const card of cards) {
+    // Row break: rowBreakBefore or card doesn't fit remaining cols
+    if (card.rowBreakBefore && currentRow.entries.length > 0) {
+      rows.push(currentRow);
+      currentRow = { entries: [], maxRowSpan: 0, usedCols: 0 };
+    }
+
+    if (currentRow.usedCols + card.colSpan > GRID_COLS) {
+      if (currentRow.entries.length > 0) {
+        rows.push(currentRow);
+      }
+      currentRow = { entries: [], maxRowSpan: 0, usedCols: 0 };
+    }
+
+    currentRow.entries.push({ card, colSpan: card.colSpan });
+    currentRow.usedCols += card.colSpan;
+    currentRow.maxRowSpan = Math.max(currentRow.maxRowSpan, card.rowSpan);
+  }
+
+  if (currentRow.entries.length > 0) {
+    rows.push(currentRow);
+  }
+
+  // Phase C: Row expansion — fill empty space
+  for (const row of rows) {
+    let remaining = GRID_COLS - row.usedCols;
+    if (remaining <= 0) continue;
+
+    // Track how much each entry has been expanded
+    const expansionCount = new Array(row.entries.length).fill(0);
+
+    while (remaining > 0) {
+      // Find the smallest entry that hasn't hit the expansion cap
+      let bestIdx = -1;
+      let bestColSpan = Infinity;
+      for (let i = 0; i < row.entries.length; i++) {
+        if (expansionCount[i] < MAX_EXPANSION && row.entries[i].colSpan < bestColSpan) {
+          bestColSpan = row.entries[i].colSpan;
+          bestIdx = i;
+        }
+      }
+
+      if (bestIdx === -1) break; // all entries hit expansion cap
+
+      row.entries[bestIdx].colSpan++;
+      expansionCount[bestIdx]++;
+      row.usedCols++;
+      remaining--;
+    }
+  }
+
+  return rows;
+}
+
+// ── Main entry point ──
+
 export async function buildCardGrid(
   frame: FrameNode,
   expressions: ExpressionCard[],
@@ -100,116 +173,65 @@ export async function buildCardGrid(
   const fontFamily = settings.fontFamily || DEFAULT_FONT_FAMILY;
   const fontSize = settings.fontSize || DEFAULT_FONT_SIZE;
 
-  // Load the card text font (Bold for card text rendering)
   await figma.loadFontAsync({ family: fontFamily, style: 'Bold' });
 
-  // Smart text measurement: auto-determine card sizes based on text content
   const sizedExpressions = await measureAndSizeCards(expressions, fontFamily, fontSize);
 
-  // Occupancy grids: occupied[page][row][col]
-  const occupied: boolean[][][] = [
-    Array.from({ length: GRID_ROWS }, () => Array(GRID_COLS).fill(false)),
-    Array.from({ length: GRID_ROWS }, () => Array(GRID_COLS).fill(false)),
-  ];
+  const rows = buildRows(sizedExpressions);
 
+  // Phase D: Physical placement — walk rows across pages
   const placements: CardPlacement[] = [];
+  let page = 0;
+  let gridRow = 0; // current row position on the grid (in cells)
 
-  for (const card of sizedExpressions) {
-    const placed = tryPlaceCard(card, occupied, frame, fontFamily, fontSize, placements);
-    if (!placed) {
-      console.warn(`Could not place card "${card.id}" — no space available.`);
+  for (const row of rows) {
+    // Check if this row fits on the current page
+    if (gridRow + row.maxRowSpan > GRID_ROWS) {
+      // Move to next page
+      page++;
+      gridRow = 0;
+      if (page >= 2) {
+        console.warn('No more pages available — some cards will not be placed.');
+        break;
+      }
     }
+
+    let col = 0;
+    for (const entry of row.entries) {
+      const { card } = entry;
+      const finalColSpan = entry.colSpan;
+      const finalRowSpan = row.maxRowSpan; // all cards in a row share the same height
+
+      const pageOffsetX = page === 0 ? 0 : HALF_PAGE_WIDTH;
+      const x = pageOffsetX + GRID_MARGIN_LEFT + col * (CELL_WIDTH + CELL_GAP);
+      const y = GRID_START_Y + gridRow * (CELL_HEIGHT + CELL_GAP);
+      const width = finalColSpan * CELL_WIDTH + (finalColSpan - 1) * CELL_GAP;
+      const height = finalRowSpan * CELL_HEIGHT + (finalRowSpan - 1) * CELL_GAP;
+
+      const cardNode = createCardNode(frame, card, x, y, width, height, fontFamily, fontSize);
+
+      placements.push({
+        id: card.id,
+        nodeId: cardNode.id,
+        col,
+        row: gridRow,
+        colSpan: finalColSpan,
+        rowSpan: finalRowSpan,
+        page,
+        lines: card.lines,
+      });
+
+      col += finalColSpan;
+    }
+
+    gridRow += row.maxRowSpan;
   }
 
   return placements;
 }
 
-/**
- * Attempts to place a single card in the grid. Returns true if placed.
- */
-function tryPlaceCard(
-  card: ExpressionCard,
-  occupied: boolean[][][],
-  frame: FrameNode,
-  fontFamily: string,
-  fontSize: number,
-  placements: CardPlacement[],
-): boolean {
-  for (let page = 0; page < 2; page++) {
-    for (let row = 0; row <= GRID_ROWS - card.rowSpan; row++) {
-      for (let col = 0; col <= GRID_COLS - card.colSpan; col++) {
-        if (canFit(occupied[page], row, col, card.rowSpan, card.colSpan)) {
-          // Mark cells as occupied
-          markOccupied(occupied[page], row, col, card.rowSpan, card.colSpan);
+// ── Card node creation (unchanged logic) ──
 
-          // Calculate pixel position
-          const pageOffsetX = page === 0 ? 0 : HALF_PAGE_WIDTH;
-          const x = pageOffsetX + GRID_MARGIN_LEFT + col * (CELL_WIDTH + CELL_GAP);
-          const y = GRID_START_Y + row * (CELL_HEIGHT + CELL_GAP);
-          const width = card.colSpan * CELL_WIDTH + (card.colSpan - 1) * CELL_GAP;
-          const height = card.rowSpan * CELL_HEIGHT + (card.rowSpan - 1) * CELL_GAP;
-
-          // Create the card frame node
-          const cardNode = createCardNode(frame, card, x, y, width, height, fontFamily, fontSize);
-
-          placements.push({
-            id: card.id,
-            nodeId: cardNode.id,
-            col,
-            row,
-            colSpan: card.colSpan,
-            rowSpan: card.rowSpan,
-            page,
-            lines: card.lines,
-          });
-
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-/**
- * Checks whether a card of (rowSpan x colSpan) fits at (startRow, startCol).
- */
-function canFit(
-  grid: boolean[][],
-  startRow: number,
-  startCol: number,
-  rowSpan: number,
-  colSpan: number,
-): boolean {
-  for (let r = startRow; r < startRow + rowSpan; r++) {
-    for (let c = startCol; c < startCol + colSpan; c++) {
-      if (grid[r][c]) return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Marks grid cells as occupied.
- */
-function markOccupied(
-  grid: boolean[][],
-  startRow: number,
-  startCol: number,
-  rowSpan: number,
-  colSpan: number,
-): void {
-  for (let r = startRow; r < startRow + rowSpan; r++) {
-    for (let c = startCol; c < startCol + colSpan; c++) {
-      grid[r][c] = true;
-    }
-  }
-}
-
-/**
- * Creates a Figma frame node for a single expression card.
- */
 function createCardNode(
   parentFrame: FrameNode,
   card: ExpressionCard,
@@ -221,17 +243,13 @@ function createCardNode(
   fontSize: number,
 ): FrameNode {
   const textContent = card.lines.join('\n');
+  const enContent = card.enLines?.join('\n') || CARD_EN_PLACEHOLDER;
 
-  // Proportional stroke and corner radius based on min(width, height)
-  // Reference: 726×760 card → 11px stroke, 56px radius
-  var minDim = Math.min(width, height);
-  var strokeWeight = Math.round(minDim * CARD_STROKE_RATIO);
-  if (strokeWeight < 1) strokeWeight = 1;
-  var cornerRadius = Math.round(minDim * CARD_CORNER_RATIO);
+  var strokeWeight = CARD_STROKE_WEIGHT;
+  var cornerRadius = CARD_CORNER_RADIUS;
 
-  // Card container
   const cardFrame = figma.createFrame();
-  cardFrame.name = `[card] ${card.lines.join(' ')}`;
+  cardFrame.name = `[card:${card.id}] ${card.lines.join(' ')}`;
   cardFrame.resize(width, height);
   cardFrame.x = x;
   cardFrame.y = y;
@@ -242,39 +260,58 @@ function createCardNode(
   cardFrame.strokeAlign = 'INSIDE';
   cardFrame.clipsContent = true;
 
-  // Store expression ID for image assignment lookup
   cardFrame.setPluginData('expressionId', card.id);
 
-  // Image placeholder — inset from card edges with rounded corners
-  // Reference: 779×679 card → [img] at (18,18), 743×471, cornerRadius 36
-  // inset ≈ strokeWeight * 1.6, imgCornerRadius ≈ inset * 2
   var inset = Math.round(strokeWeight * 1.6);
-  var imgCornerRadius = Math.round(inset * 2);
-  var textHeight = height - Math.round(height * CARD_IMAGE_RATIO);
+  // Cap image zone at default card's image height — extra card height goes to text
+  var defaultCardH = DEFAULT_ROW_SPAN * CELL_HEIGHT + (DEFAULT_ROW_SPAN - 1) * CELL_GAP;
+  var maxImageZone = Math.round(defaultCardH * CARD_IMAGE_RATIO);
+  var imageZone = Math.min(Math.round(height * CARD_IMAGE_RATIO), maxImageZone);
+  var textAreaHeight = height - imageZone;
   var imgW = width - 2 * inset;
-  var imgH = height - textHeight - 2 * inset;
+  var imgH = imageZone - 2 * inset;
 
   var imgFrame = figma.createFrame();
-  imgFrame.name = '[img]';
+  imgFrame.name = `[img:${card.id}]`;
   imgFrame.resize(imgW, imgH);
   imgFrame.x = inset;
   imgFrame.y = inset;
-  imgFrame.cornerRadius = imgCornerRadius;
+  imgFrame.cornerRadius = CARD_IMG_CORNER_RADIUS;
   imgFrame.fills = [{ type: 'SOLID', color: hexToFigmaColor('#F0F0F0') }];
   imgFrame.clipsContent = true;
   cardFrame.appendChild(imgFrame);
-  const textNode = figma.createText();
-  textNode.name = 'card-text';
-  textNode.fontName = { family: fontFamily, style: 'Bold' };
-  textNode.fontSize = fontSize;
-  textNode.characters = textContent;
-  textNode.textAlignHorizontal = 'CENTER';
-  textNode.textAlignVertical = 'CENTER';
-  textNode.resize(width, textHeight);
-  textNode.x = 0;
-  textNode.y = height - textHeight;
-  textNode.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
-  cardFrame.appendChild(textNode);
+
+  var koTextHeight = Math.round(textAreaHeight * CARD_KO_TEXT_RATIO);
+  var koTextY = height - textAreaHeight;
+
+  const koTextNode = figma.createText();
+  koTextNode.name = 'card-text';
+  koTextNode.fontName = { family: fontFamily, style: 'Bold' };
+  koTextNode.fontSize = fontSize;
+  koTextNode.characters = textContent;
+  koTextNode.textAlignHorizontal = 'CENTER';
+  koTextNode.textAlignVertical = 'CENTER';
+  koTextNode.resize(width, koTextHeight);
+  koTextNode.x = 0;
+  koTextNode.y = koTextY;
+  koTextNode.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
+  cardFrame.appendChild(koTextNode);
+
+  var enTextHeight = textAreaHeight - koTextHeight;
+  var enTextY = koTextY + koTextHeight - 17;
+
+  const enTextNode = figma.createText();
+  enTextNode.name = 'card-text-en';
+  enTextNode.fontName = { family: fontFamily, style: 'Bold' };
+  enTextNode.fontSize = CARD_EN_FONT_SIZE;
+  enTextNode.characters = enContent;
+  enTextNode.textAlignHorizontal = 'CENTER';
+  enTextNode.textAlignVertical = 'CENTER';
+  enTextNode.resize(width, enTextHeight);
+  enTextNode.x = 0;
+  enTextNode.y = enTextY;
+  enTextNode.fills = [{ type: 'SOLID', color: hexToFigmaColor(CARD_EN_TEXT_COLOR) }];
+  cardFrame.appendChild(enTextNode);
 
   parentFrame.appendChild(cardFrame);
 

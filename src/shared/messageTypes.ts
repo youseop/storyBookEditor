@@ -1,9 +1,11 @@
 // Expression data after parsing
 export interface ExpressionCard {
   id: string;
-  lines: string[];       // text lines within the card
-  colSpan: 1 | 2;       // 1=normal, 2=wide
-  rowSpan: 1 | 2;       // 1=normal, 2=tall
+  lines: string[];       // text lines within the card (Korean)
+  enLines?: string[];    // English translation lines
+  colSpan: number;       // grid cells wide (default 2)
+  rowSpan: number;       // grid cells tall (default 2)
+  rowBreakBefore?: boolean; // force new row (triple newline)
 }
 
 // Settings from UI
@@ -34,6 +36,7 @@ export interface ImageMeta {
   prompt: string;
   isActive: boolean;
   index: number;
+  imageBase64?: string;
 }
 
 // ---- Messages: UI → Sandbox ----
@@ -42,12 +45,14 @@ export interface GenerateLayoutMessage {
   type: 'GENERATE_LAYOUT';
   expressions: ExpressionCard[];
   settings: PluginSettings;
+  frameId?: string;
 }
 
 export interface UpdateLayoutMessage {
   type: 'UPDATE_LAYOUT';
   expressions: ExpressionCard[];
   settings: PluginSettings;
+  frameId?: string;
 }
 
 export interface ExportRefFrameMessage {
@@ -62,18 +67,21 @@ export interface StoreImageMessage {
   imageBytes: number[];   // Uint8Array as number array
   prompt: string;
   index: number;
+  frameId?: string;       // target KeyExpr frame ID
 }
 
 export interface AssignImageMessage {
   type: 'ASSIGN_IMAGE';
   expressionId: string;
   imageHash: string;
+  frameId?: string;       // target KeyExpr frame ID
 }
 
 export interface SwapImageMessage {
   type: 'SWAP_IMAGE';
   expressionId: string;
   newImageHash: string;
+  frameId?: string;       // target KeyExpr frame ID
 }
 
 export interface MeasureTextMessage {
@@ -94,6 +102,7 @@ export interface LoadApiKeyMessage {
 
 export interface CleanupTempMessage {
   type: 'CLEANUP_TEMP';
+  frameId?: string;
 }
 
 export interface NewPageMessage {
@@ -111,6 +120,7 @@ export interface CheckRefFrameMessage {
 export interface LayoutCreatedMessage {
   type: 'LAYOUT_CREATED';
   placements: CardPlacement[];
+  frameId: string;
 }
 
 export interface RefFrameExportedMessage {
@@ -144,7 +154,8 @@ export interface ApiKeyLoadedMessage {
 export interface FrameSelectedMessage {
   type: 'FRAME_SELECTED';
   frameId: string;
-  expressionText: string;  // reconstructed text for the input field
+  expressionText: string;
+  enTextPairs: { cardId: string; korean: string; en: string }[];
 }
 
 export interface RefFrameCheckedMessage {

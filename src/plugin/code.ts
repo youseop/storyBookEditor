@@ -9,7 +9,40 @@ import type {
 } from '../shared/messageTypes';
 import { DEFAULT_FONT_FAMILY, FRAME_HEIGHT } from '../shared/constants';
 
-const MAIN_FRAME_NAME = '[KeyExpr] Key Expressions';
+const MAIN_FRAME_PREFIX = '[KeyExpr] Key Expressions';
+
+/**
+ * Find the Image Storage frame that belongs to a given KeyExpr frame.
+ */
+function findStorageForFrame(mainFrame: FrameNode): FrameNode | null {
+  const keyExprId = mainFrame.getPluginData('keyExprId');
+  if (keyExprId) {
+    const byData = figma.currentPage.findOne(
+      (n) => n.type === 'FRAME' && n.getPluginData('keyExprId') === keyExprId && n.name.startsWith('[KeyExpr] Image Storage')
+    ) as FrameNode | null;
+    if (byData) return byData;
+  }
+  // Legacy fallback
+  return figma.currentPage.findOne(
+    (n) => n.type === 'FRAME' && n.name === '[KeyExpr] Image Storage'
+  ) as FrameNode | null;
+}
+
+/**
+ * Find a KeyExpr frame by its Figma node ID, or fall back to first matching frame.
+ */
+function findKeyExprFrame(frameId?: string): FrameNode | null {
+  if (frameId) {
+    const node = figma.getNodeById(frameId);
+    if (node && node.type === 'FRAME' && node.name.startsWith(MAIN_FRAME_PREFIX)) {
+      return node as FrameNode;
+    }
+  }
+  // Fallback: find first matching frame on current page
+  return figma.currentPage.findOne(
+    (n) => n.type === 'FRAME' && n.name.startsWith(MAIN_FRAME_PREFIX)
+  ) as FrameNode | null;
+}
 
 figma.showUI(__html__, { width: 480, height: 640 });
 
@@ -24,7 +57,7 @@ figma.on('selectionchange', () => {
 
   // Extract card text from the frame
   const cardFrames = node.findAll(
-    (n) => n.type === 'FRAME' && n.name.startsWith('[card]')
+    (n) => n.type === 'FRAME' && n.name.startsWith('[card:')
   ) as FrameNode[];
 
   if (cardFrames.length === 0) {
@@ -33,6 +66,7 @@ figma.on('selectionchange', () => {
       type: 'FRAME_SELECTED',
       frameId: node.id,
       expressionText: '',
+      enTextPairs: [],
     });
     return;
   }
@@ -43,15 +77,26 @@ figma.on('selectionchange', () => {
     return a.x - b.x;
   });
 
-  // Extract text from each card's text node
+  // Extract text from each card's text nodes (Korean + English)
   const expressions: string[] = [];
+  const enTextPairs: { cardId: string; korean: string; en: string }[] = [];
   for (var i = 0; i < sorted.length; i++) {
     var card = sorted[i];
     var textNode = card.findOne(
       (n) => n.name === 'card-text' && n.type === 'TEXT'
     ) as TextNode | null;
+    var enTextNode = card.findOne(
+      (n) => n.name === 'card-text-en' && n.type === 'TEXT'
+    ) as TextNode | null;
     if (textNode) {
-      expressions.push(textNode.characters);
+      var koreanText = textNode.characters;
+      var cardId = card.getPluginData('expressionId') || `card_${i + 1}`;
+      expressions.push(koreanText);
+      enTextPairs.push({
+        cardId: cardId,
+        korean: koreanText,
+        en: enTextNode ? enTextNode.characters : '',
+      });
     }
   }
 
@@ -62,21 +107,26 @@ figma.on('selectionchange', () => {
     type: 'FRAME_SELECTED',
     frameId: node.id,
     expressionText: expressionText,
+    enTextPairs: enTextPairs,
   });
 });
 
-figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
+// Prevent concurrent UPDATE_LAYOUT / GENERATE_LAYOUT builds
+let buildInProgress = false;
+let pendingBuildMsg: UIToSandboxMessage | null = null;
+
+async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
   switch (msg.type) {
     case 'GENERATE_LAYOUT': {
       try {
-        const { expressions, settings } = msg;
+        const { expressions, settings, frameId } = msg;
 
-        // Remove any existing main frame to avoid duplicates
-        const existingFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name === MAIN_FRAME_NAME
-        ) as FrameNode | null;
-        if (existingFrame) {
-          existingFrame.remove();
+        // Remove existing frame if targeting a specific one
+        if (frameId) {
+          const existingFrame = findKeyExprFrame(frameId);
+          if (existingFrame) {
+            existingFrame.remove();
+          }
         }
 
         // Build the main frame with title and guidelines
@@ -94,6 +144,7 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
         figma.ui.postMessage({
           type: 'LAYOUT_CREATED',
           placements,
+          frameId: mainFrame.id,
         });
       } catch (err: any) {
         figma.ui.postMessage({
@@ -106,13 +157,17 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
     }
 
     case 'UPDATE_LAYOUT': {
+      // If a build is already running, queue this as pending (only latest matters)
+      if (buildInProgress) {
+        pendingBuildMsg = msg;
+        break;
+      }
+      buildInProgress = true;
       try {
-        const { expressions, settings } = msg;
+        const { expressions, settings, frameId } = msg;
 
-        // Find existing frame on the current page
-        let mainFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name === MAIN_FRAME_NAME
-        ) as FrameNode | null;
+        // Find existing frame by ID or fallback
+        let mainFrame = findKeyExprFrame(frameId);
 
         if (mainFrame) {
           // Remove old card children, keep title/guidelines intact
@@ -122,11 +177,8 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
           mainFrame = await createMainFrame(settings);
         }
 
-        // Ensure storage frame exists
-        const storageExists = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name === '[KeyExpr] Image Storage'
-        );
-        if (!storageExists) {
+        // Ensure storage frame exists for this KeyExpr frame
+        if (!findStorageForFrame(mainFrame)) {
           createStorageFrame(mainFrame);
         }
 
@@ -139,6 +191,7 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
         figma.ui.postMessage({
           type: 'LAYOUT_CREATED',
           placements,
+          frameId: mainFrame.id,
         });
       } catch (err: any) {
         figma.ui.postMessage({
@@ -146,6 +199,14 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
           message: 'Failed to update layout',
           detail: err?.message ?? String(err),
         });
+      } finally {
+        buildInProgress = false;
+        // Process pending build if queued
+        if (pendingBuildMsg) {
+          const next = pendingBuildMsg;
+          pendingBuildMsg = null;
+          handleMessage(next);
+        }
       }
       break;
     }
@@ -169,10 +230,9 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
 
     case 'STORE_IMAGE': {
       try {
-        // Find the storage frame on the current page
-        const storageFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name === '[KeyExpr] Image Storage'
-        ) as FrameNode | null;
+        // Find the active KeyExpr frame, then its storage frame
+        const activeMain = findKeyExprFrame(msg.frameId);
+        const storageFrame = activeMain ? findStorageForFrame(activeMain) : null;
 
         if (!storageFrame) {
           throw new Error('Image storage frame not found. Generate a layout first.');
@@ -206,9 +266,7 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
 
     case 'ASSIGN_IMAGE': {
       try {
-        const mainFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name.startsWith('[KeyExpr] Key Expressions')
-        ) as FrameNode | null;
+        const mainFrame = findKeyExprFrame(msg.frameId);
 
         if (!mainFrame) {
           throw new Error('Main frame not found.');
@@ -232,9 +290,7 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
 
     case 'SWAP_IMAGE': {
       try {
-        const mainFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name.startsWith('[KeyExpr] Key Expressions')
-        ) as FrameNode | null;
+        const mainFrame = findKeyExprFrame(msg.frameId);
 
         if (!mainFrame) {
           throw new Error('Main frame not found.');
@@ -347,9 +403,7 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
 
     case 'CLEANUP_TEMP': {
       try {
-        const mainFrame = figma.currentPage.findOne(
-          (n) => n.type === 'FRAME' && n.name === MAIN_FRAME_NAME
-        ) as FrameNode | null;
+        const mainFrame = findKeyExprFrame(msg.frameId);
 
         if (mainFrame) {
           const tempNodes = mainFrame.findAll(
@@ -412,4 +466,8 @@ figma.ui.onmessage = async (msg: UIToSandboxMessage) => {
       break;
     }
   }
+}
+
+figma.ui.onmessage = (msg: UIToSandboxMessage) => {
+  handleMessage(msg);
 };

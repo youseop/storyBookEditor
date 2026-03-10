@@ -10,8 +10,10 @@ import {
  * Used to hold generated image variants before they are assigned to cards.
  */
 export function createStorageFrame(mainFrame: FrameNode): FrameNode {
+  const keyExprId = mainFrame.getPluginData('keyExprId') || '';
   const storageFrame = figma.createFrame();
-  storageFrame.name = '[KeyExpr] Image Storage';
+  storageFrame.name = `[KeyExpr] Image Storage #${keyExprId}`;
+  storageFrame.setPluginData('keyExprId', keyExprId);
   storageFrame.resize(STORAGE_IMAGE_SIZE * 12, FRAME_HEIGHT);
   storageFrame.x = mainFrame.x + FRAME_WIDTH + STORAGE_GAP;
   storageFrame.y = mainFrame.y;
@@ -39,23 +41,16 @@ export function storeImage(
   var imageHash = image.hash;
 
   // Display name: Korean text (fallback to expressionId)
-  var displayName = expressionText || expressionId.replace(/^expr_/, '').replace(/_/g, ' ');
+  var displayName = expressionText || expressionId;
 
   // Find or create a group frame for this expression
   var groupFrame = storageFrame.findOne(
     function(n) { return n.type === 'FRAME' && n.getPluginData('expressionId') === expressionId; }
   ) as FrameNode | null;
 
-  // Fallback: match by old naming convention
-  if (!groupFrame) {
-    groupFrame = storageFrame.findOne(
-      function(n) { return n.type === 'FRAME' && n.name === '[store] ' + expressionId; }
-    ) as FrameNode | null;
-  }
-
   if (!groupFrame) {
     groupFrame = figma.createFrame();
-    groupFrame.name = displayName;
+    groupFrame.name = `[store:${expressionId}] ${displayName}`;
     groupFrame.fills = [];
     groupFrame.setPluginData('expressionId', expressionId);
     // Stack groups vertically — find the actual bottom of existing groups
@@ -79,7 +74,7 @@ export function storeImage(
 
   // Create the image rectangle inside the group
   var imgRect = figma.createRectangle();
-  imgRect.name = displayName + '_' + (existingCount + 1);
+  imgRect.name = `[store:${expressionId}:${index}] ${displayName}`;
   imgRect.resize(STORAGE_IMAGE_SIZE, STORAGE_IMAGE_SIZE);
   imgRect.x = existingCount * (STORAGE_IMAGE_SIZE + 10);
   imgRect.y = 0;
@@ -90,10 +85,11 @@ export function storeImage(
       scaleMode: 'FIT',
     },
   ];
-  // Store the prompt as plugin data for reference
+  // Store metadata as plugin data
   imgRect.setPluginData('prompt', prompt);
   imgRect.setPluginData('expressionId', expressionId);
   imgRect.setPluginData('imageHash', imageHash);
+  imgRect.setPluginData('imageIndex', String(index));
 
   groupFrame.appendChild(imgRect);
 
@@ -101,9 +97,7 @@ export function storeImage(
 }
 
 /**
- * Assigns a stored image (by hash) to the [img] frame inside a card.
- * Creates a child Rectangle inside the frame so the image is a separate
- * movable node. The frame's clipsContent handles visual clipping.
+ * Assigns a stored image (by hash) to the [img:expressionId] frame inside a card.
  */
 export function assignImage(
   mainFrame: FrameNode,
@@ -114,11 +108,21 @@ export function assignImage(
   var cardFrame = findCardByExpressionId(mainFrame, expressionId);
   if (!cardFrame) return false;
 
-  // Find the [img] frame (now a Frame, not Rectangle)
+  // Find the [img:expressionId] frame
   var imgFrame = cardFrame.findOne(
-    function(n) { return n.name === '[img]' && n.type === 'FRAME'; }
+    function(n) { return n.name === `[img:${expressionId}]` && n.type === 'FRAME'; }
   ) as FrameNode | null;
+
+  // Fallback: match by legacy [img] name or any [img:*] pattern
+  if (!imgFrame) {
+    imgFrame = cardFrame.findOne(
+      function(n) { return n.type === 'FRAME' && (n.name === '[img]' || n.name.startsWith('[img:')); }
+    ) as FrameNode | null;
+  }
   if (!imgFrame) return false;
+
+  // Update img frame name to current ID
+  imgFrame.name = `[img:${expressionId}]`;
 
   // Remove existing image children (for re-assignment)
   for (var i = imgFrame.children.length - 1; i >= 0; i--) {
@@ -126,9 +130,8 @@ export function assignImage(
   }
 
   // Create image rectangle as child of the [img] frame
-  // Sized to match the frame — frame's clipsContent clips overflow
   var imgRect = figma.createRectangle();
-  imgRect.name = 'image';
+  imgRect.name = `[image:${expressionId}]`;
   imgRect.resize(imgFrame.width, imgFrame.height);
   imgRect.x = 0;
   imgRect.y = 0;
@@ -139,6 +142,8 @@ export function assignImage(
       scaleMode: 'FIT',
     },
   ];
+  imgRect.setPluginData('expressionId', expressionId);
+  imgRect.setPluginData('imageHash', imageHash);
 
   // Clear the placeholder background
   imgFrame.fills = [];
@@ -160,8 +165,7 @@ export function swapImage(
 
 /**
  * Finds a card frame by expression ID within the main frame.
- * Cards are named "[card] <text>", but we also store the ID in plugin data
- * or match by the expression text.
+ * Cards are named "[card:expressionId] <text>" with expressionId in plugin data.
  */
 function findCardByExpressionId(
   mainFrame: FrameNode,
@@ -179,28 +183,21 @@ function findCardByExpressionId(
 
   if (byPluginData) return byPluginData;
 
-  // Fallback: scan card frames and match by name pattern
-  // The card node name is "[card] <lines joined by space>"
-  // The expressionId is typically the same as the card identifier
+  // Fallback: match by name pattern [card:expressionId]
+  const byName = mainFrame.findOne(
+    (n) => n.type === 'FRAME' && n.name.startsWith(`[card:${expressionId}]`)
+  ) as FrameNode | null;
+
+  if (byName) return byName;
+
+  // Legacy fallback: scan [card] or [card:*] frames
   const cardFrames = mainFrame.findAll(
-    (n) => n.type === 'FRAME' && n.name.startsWith('[card]')
+    (n) => n.type === 'FRAME' && n.name.startsWith('[card')
   ) as FrameNode[];
 
   for (const card of cardFrames) {
-    // Store the expressionId as plugin data on first match attempt
-    // so future lookups are faster
     const storedId = card.getPluginData('expressionId');
     if (storedId === expressionId) return card;
-  }
-
-  // Last resort: try to match by node ID (expressionId might be the Figma node ID)
-  try {
-    const node = figma.getNodeById(expressionId);
-    if (node && node.type === 'FRAME' && node.parent === mainFrame) {
-      return node as FrameNode;
-    }
-  } catch {
-    // Node ID lookup failed
   }
 
   return null;
