@@ -12,6 +12,25 @@ import { DEFAULT_FONT_FAMILY, FRAME_HEIGHT } from '../shared/constants';
 const MAIN_FRAME_PREFIX = '[KeyExpr] Key Expressions';
 
 /**
+ * Manual base64 encoder for Figma sandbox (no btoa available).
+ */
+function uint8ToBase64(bytes: Uint8Array): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += chars[b0 >> 2];
+    result += chars[((b0 & 3) << 4) | (b1 >> 4)];
+    result += i + 1 < len ? chars[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+    result += i + 2 < len ? chars[b2 & 63] : '=';
+  }
+  return result;
+}
+
+/**
  * Find the Image Storage frame that belongs to a given KeyExpr frame.
  */
 function findStorageForFrame(mainFrame: FrameNode): FrameNode | null {
@@ -48,7 +67,14 @@ figma.showUI(__html__, { width: 480, height: 640 });
 
 // ---- Selection change listener ----
 // Detect when user selects a KeyExpr frame and extract expressions from it
+let selectionSeq = 0;
+
 figma.on('selectionchange', () => {
+  selectionSeq++;
+  handleSelectionChange(selectionSeq);
+});
+
+async function handleSelectionChange(seq: number): Promise<void> {
   const selection = figma.currentPage.selection;
   if (selection.length !== 1) return;
 
@@ -61,7 +87,6 @@ figma.on('selectionchange', () => {
   ) as FrameNode[];
 
   if (cardFrames.length === 0) {
-    // Valid KeyExpr frame but no cards — newly created empty frame
     figma.ui.postMessage({
       type: 'FRAME_SELECTED',
       frameId: node.id,
@@ -72,13 +97,11 @@ figma.on('selectionchange', () => {
     return;
   }
 
-  // Sort cards by page (left vs right), then row (y position), then column (x position)
   const sorted = cardFrames.slice().sort((a, b) => {
     if (a.y !== b.y) return a.y - b.y;
     return a.x - b.x;
   });
 
-  // Extract text from each card's text nodes (Korean + English)
   const expressions: string[] = [];
   const enTextPairs: { cardId: string; korean: string; en: string }[] = [];
   for (var i = 0; i < sorted.length; i++) {
@@ -101,14 +124,14 @@ figma.on('selectionchange', () => {
     }
   }
 
-  // Join with double newline (each expression separated by blank line)
   var expressionText = expressions.join('\n\n');
 
-  // Scan Image Storage for stored images
+  // Scan Image Storage for stored images (metadata only — thumbnails sent async)
   var storedImages: { expressionId: string; imageHash: string; prompt: string; index: number; isActive: boolean }[] = [];
   var storageFrame = findStorageForFrame(node as FrameNode);
+  var storageRects: RectangleNode[] = [];
+
   if (storageFrame) {
-    // Collect active image hashes from cards
     var activeHashes = new Set<string>();
     for (var ci = 0; ci < sorted.length; ci++) {
       var imgRect = sorted[ci].findOne(
@@ -120,11 +143,11 @@ figma.on('selectionchange', () => {
       }
     }
 
-    var allRects = storageFrame.findAll(
+    storageRects = storageFrame.findAll(
       function(n) { return n.type === 'RECTANGLE' && n.getPluginData('imageHash') !== ''; }
     ) as RectangleNode[];
-    for (var ri = 0; ri < allRects.length; ri++) {
-      var rect = allRects[ri];
+    for (var ri = 0; ri < storageRects.length; ri++) {
+      var rect = storageRects[ri];
       var hash = rect.getPluginData('imageHash');
       storedImages.push({
         expressionId: rect.getPluginData('expressionId'),
@@ -136,6 +159,7 @@ figma.on('selectionchange', () => {
     }
   }
 
+  // Send metadata immediately so UI can render structure
   figma.ui.postMessage({
     type: 'FRAME_SELECTED',
     frameId: node.id,
@@ -143,7 +167,27 @@ figma.on('selectionchange', () => {
     enTextPairs: enTextPairs,
     storedImages: storedImages,
   });
-});
+
+  // Async: export thumbnails from storage rectangles
+  for (var ti = 0; ti < storageRects.length; ti++) {
+    if (seq !== selectionSeq) return; // selection changed, abort
+    try {
+      var tRect = storageRects[ti];
+      var tBytes = await tRect.exportAsync({ format: 'PNG', constraint: { type: 'WIDTH', value: 160 } });
+      if (seq !== selectionSeq) return;
+      // Manual base64 encode (Figma sandbox has no btoa)
+      var tBase64 = uint8ToBase64(tBytes);
+      figma.ui.postMessage({
+        type: 'IMAGE_THUMBNAIL',
+        expressionId: tRect.getPluginData('expressionId'),
+        imageHash: tRect.getPluginData('imageHash'),
+        imageBase64: tBase64,
+      });
+    } catch {
+      // Skip failed exports silently
+    }
+  }
+}
 
 // Prevent concurrent UPDATE_LAYOUT / GENERATE_LAYOUT builds
 let buildInProgress = false;

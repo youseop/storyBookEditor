@@ -248,6 +248,22 @@ const App: React.FC = () => {
         setFigmaCardIds(undefined);
         break;
 
+      case 'IMAGE_THUMBNAIL': {
+        setGeneratedImages(prev => {
+          const next = new Map(prev);
+          const images = next.get(msg.expressionId);
+          if (images) {
+            next.set(msg.expressionId, images.map(img =>
+              img.imageHash === msg.imageHash
+                ? { ...img, imageBase64: msg.imageBase64 }
+                : img
+            ));
+          }
+          return next;
+        });
+        break;
+      }
+
       case 'ERROR':
         setError(msg.message + (msg.detail ? `: ${msg.detail}` : ''));
         setIsGeneratingLayout(false);

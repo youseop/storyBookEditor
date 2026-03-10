@@ -182,6 +182,13 @@ export interface NewPageCreatedMessage {
   frameId: string;
 }
 
+export interface ImageThumbnailMessage {
+  type: 'IMAGE_THUMBNAIL';
+  expressionId: string;
+  imageHash: string;
+  imageBase64: string;
+}
+
 export interface ErrorMessage {
   type: 'ERROR';
   message: string;
@@ -214,4 +221,5 @@ export type SandboxToUIMessage =
   | FrameSelectedMessage
   | NewPageCreatedMessage
   | RefFrameCheckedMessage
+  | ImageThumbnailMessage
   | ErrorMessage;
