@@ -205,21 +205,38 @@ const App: React.FC = () => {
         break;
       }
 
-      case 'FRAME_SELECTED':
+      case 'FRAME_SELECTED': {
         setActiveFrameId(msg.frameId);
         setExpressions(msg.expressionText);
         setEnLinesMap(new Map());
         if (msg.enTextPairs && msg.enTextPairs.length > 0) {
           pendingEnTextsRef.current = msg.enTextPairs;
-          // Pass Figma card IDs to the parser so it assigns matching IDs
           setFigmaCardIds(msg.enTextPairs.map(p => ({ cardId: p.cardId, korean: p.korean })));
         } else {
           pendingEnTextsRef.current = null;
           setFigmaCardIds(undefined);
         }
-        setGeneratedImages(new Map());
+        // Restore generated images from Image Storage
+        if (msg.storedImages && msg.storedImages.length > 0) {
+          const restoredMap = new Map<string, ImageMeta[]>();
+          for (const img of msg.storedImages) {
+            const existing = restoredMap.get(img.expressionId) || [];
+            existing.push({
+              expressionId: img.expressionId,
+              imageHash: img.imageHash,
+              prompt: img.prompt,
+              isActive: img.isActive,
+              index: img.index,
+            });
+            restoredMap.set(img.expressionId, existing);
+          }
+          setGeneratedImages(restoredMap);
+        } else {
+          setGeneratedImages(new Map());
+        }
         setPlacements([]);
         break;
+      }
 
       case 'NEW_PAGE_CREATED':
         setActiveFrameId(msg.frameId);
@@ -594,6 +611,13 @@ const App: React.FC = () => {
           style={{ width: '100%', marginTop: 4 }}
         >
           + New Page
+        </button>
+        <button
+          className="btn btn-subtle"
+          onClick={() => postToPlugin({ type: 'CLEANUP_GUIDES' })}
+          style={{ width: '100%', marginTop: 2 }}
+        >
+          Remove All Guides
         </button>
       </div>
     </div>

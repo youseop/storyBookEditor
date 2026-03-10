@@ -150,6 +150,19 @@ button {
   background: #D32F2F;
 }
 
+.btn-subtle {
+  font-size: 11px;
+  padding: 4px 8px;
+  color: var(--text-light);
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn-subtle:hover {
+  background: #F0F0F0;
+  color: var(--text);
+}
+
 .btn-danger:active {
   background: #C62828;
 }

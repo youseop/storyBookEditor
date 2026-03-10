@@ -115,6 +115,10 @@ export interface CheckRefFrameMessage {
   frameName: string;
 }
 
+export interface CleanupGuidesMessage {
+  type: 'CLEANUP_GUIDES';
+}
+
 // ---- Messages: Sandbox → UI ----
 
 export interface LayoutCreatedMessage {
@@ -151,11 +155,20 @@ export interface ApiKeyLoadedMessage {
   apiKey: string;
 }
 
+export interface StoredImageInfo {
+  expressionId: string;
+  imageHash: string;
+  prompt: string;
+  index: number;
+  isActive: boolean; // true if currently assigned to the card
+}
+
 export interface FrameSelectedMessage {
   type: 'FRAME_SELECTED';
   frameId: string;
   expressionText: string;
   enTextPairs: { cardId: string; korean: string; en: string }[];
+  storedImages: StoredImageInfo[];
 }
 
 export interface RefFrameCheckedMessage {
@@ -188,7 +201,8 @@ export type UIToSandboxMessage =
   | LoadApiKeyMessage
   | CleanupTempMessage
   | NewPageMessage
-  | CheckRefFrameMessage;
+  | CheckRefFrameMessage
+  | CleanupGuidesMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage

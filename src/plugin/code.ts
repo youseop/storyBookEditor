@@ -67,6 +67,7 @@ figma.on('selectionchange', () => {
       frameId: node.id,
       expressionText: '',
       enTextPairs: [],
+      storedImages: [],
     });
     return;
   }
@@ -103,11 +104,44 @@ figma.on('selectionchange', () => {
   // Join with double newline (each expression separated by blank line)
   var expressionText = expressions.join('\n\n');
 
+  // Scan Image Storage for stored images
+  var storedImages: { expressionId: string; imageHash: string; prompt: string; index: number; isActive: boolean }[] = [];
+  var storageFrame = findStorageForFrame(node as FrameNode);
+  if (storageFrame) {
+    // Collect active image hashes from cards
+    var activeHashes = new Set<string>();
+    for (var ci = 0; ci < sorted.length; ci++) {
+      var imgRect = sorted[ci].findOne(
+        function(n) { return n.type === 'RECTANGLE' && n.name.startsWith('[image:'); }
+      ) as RectangleNode | null;
+      if (imgRect) {
+        var h = imgRect.getPluginData('imageHash');
+        if (h) activeHashes.add(h);
+      }
+    }
+
+    var allRects = storageFrame.findAll(
+      function(n) { return n.type === 'RECTANGLE' && n.getPluginData('imageHash') !== ''; }
+    ) as RectangleNode[];
+    for (var ri = 0; ri < allRects.length; ri++) {
+      var rect = allRects[ri];
+      var hash = rect.getPluginData('imageHash');
+      storedImages.push({
+        expressionId: rect.getPluginData('expressionId'),
+        imageHash: hash,
+        prompt: rect.getPluginData('prompt'),
+        index: parseInt(rect.getPluginData('imageIndex') || '0', 10),
+        isActive: activeHashes.has(hash),
+      });
+    }
+  }
+
   figma.ui.postMessage({
     type: 'FRAME_SELECTED',
     frameId: node.id,
     expressionText: expressionText,
     enTextPairs: enTextPairs,
+    storedImages: storedImages,
   });
 });
 
@@ -455,6 +489,24 @@ async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
         figma.ui.postMessage({
           type: 'ERROR',
           message: 'Failed to create new page',
+          detail: err?.message ?? String(err),
+        });
+      }
+      break;
+    }
+
+    case 'CLEANUP_GUIDES': {
+      try {
+        var guideNodes = figma.currentPage.findAll(
+          function(n) { return n.name === 'center-guide-temp'; }
+        );
+        var count = guideNodes.length;
+        guideNodes.forEach(function(n) { n.remove(); });
+        figma.notify(count + '개 가이드라인 삭제됨');
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to cleanup guides',
           detail: err?.message ?? String(err),
         });
       }

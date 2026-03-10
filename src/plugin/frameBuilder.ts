@@ -85,7 +85,7 @@ export async function createMainFrame(settings: PluginSettings): Promise<FrameNo
   const guideColor = hexToFigmaColor(GUIDELINE_COLOR);
 
   const centerDiv = figma.createRectangle();
-  centerDiv.name = 'center-guide';
+  centerDiv.name = 'center-guide-temp';
   centerDiv.fills = [{ type: 'SOLID', color: guideColor }];
   centerDiv.resize(40, FRAME_HEIGHT);
   centerDiv.x = HALF_PAGE_WIDTH - 20;
