@@ -167,9 +167,13 @@ export function getImageAspectRatio(colSpan: number, rowSpan: number): string {
 /**
  * Build the Korean prompt for a given expression.
  */
-export function buildImagePrompt(expressionLines: string[], colSpan?: number, rowSpan?: number): string {
+export function buildImagePrompt(expressionLines: string[], colSpan?: number, rowSpan?: number, customNote?: string): string {
   var expression = expressionLines.join(' ');
-  return '흰 바탕 위에 "' + expression + '"을(를) 직관적으로 잘 나타내는 이미지를 그려줘. 첨부한 레퍼런스 이미지와 같은 스타일로 그려줘. 텍스트 없이 이미지만 생성해줘.';
+  var prompt = '흰 바탕 위에 "' + expression + '"을(를) 직관적으로 잘 나타내는 이미지를 그려줘. 첨부한 레퍼런스 이미지와 같은 스타일로 그려줘. 텍스트 없이 이미지만 생성해줘.';
+  if (customNote) {
+    prompt += ' 추가 요청: ' + customNote;
+  }
+  return prompt;
 }
 
 /**

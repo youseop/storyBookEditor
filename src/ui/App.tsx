@@ -473,9 +473,19 @@ const App: React.FC = () => {
                 return next;
               });
             }}
-            onRegen={(expressionId, customPrompt) => {
+            onRegen={async (expressionId, customPrompt) => {
               const card = parsedCards.find(c => c.id === expressionId);
               if (!card || !settings.apiKey) return;
+              // Ensure reference image is available
+              if (settings.refFrameName && !refImageRef.current) {
+                postToPlugin({ type: 'EXPORT_REF_FRAME', frameName: settings.refFrameName });
+                await new Promise<void>(resolve => {
+                  const check = setInterval(() => {
+                    if (refImageRef.current) { clearInterval(check); resolve(); }
+                  }, 200);
+                  setTimeout(() => { clearInterval(check); resolve(); }, 10000);
+                });
+              }
               const existingCount = generatedImages.get(expressionId)?.length || 0;
               gemini.generateSingle(settings.apiKey, card, customPrompt, refImageRef.current, existingCount, activeFrameId || undefined);
             }}

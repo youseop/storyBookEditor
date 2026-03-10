@@ -123,7 +123,7 @@ export function useGeminiApi() {
     frameId?: string,
   ) => {
     const aspectRatio = getImageAspectRatio(expression.colSpan, expression.rowSpan);
-    const prompt = customPrompt || buildImagePrompt(expression.lines, expression.colSpan, expression.rowSpan);
+    const prompt = buildImagePrompt(expression.lines, expression.colSpan, expression.rowSpan, customPrompt);
 
     const result = await generateImage(apiKey, prompt, referenceImageBase64, undefined, aspectRatio);
 
