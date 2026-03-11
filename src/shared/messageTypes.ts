@@ -1,3 +1,24 @@
+// Relative image position/size per card instance (frame-size-independent)
+export interface ImageTransform {
+  scaleX: number;   // imageWidth / frameWidth (horizontal zoom ratio, 1 = fit)
+  scaleY: number;   // imageHeight / frameHeight (vertical zoom ratio, 1 = fit)
+  offsetX: number;  // normalized horizontal offset from center (0 = centered)
+  offsetY: number;  // normalized vertical offset from center (0 = centered)
+}
+
+// Expression-level data: maps normalized Korean text → expression ID + translation + selected image
+export interface ContentIdMapEntry {
+  expressionId: number;  // numeric expression index (0, 1, 2...)
+  en?: string;           // English translation (shared across all cards with this text)
+  imageIndex?: number;   // selected image variant index (shared)
+}
+
+// Expression map: normalized Korean text → entry
+export type ContentIdMap = Record<string, ContentIdMapEntry>;
+
+// Per-card image transform: cardId → transform (each card instance's own image position/size)
+export type CardTransformMap = Record<string, ImageTransform>;
+
 // Expression data after parsing
 export interface ExpressionCard {
   id: string;
@@ -119,12 +140,43 @@ export interface CleanupGuidesMessage {
   type: 'CLEANUP_GUIDES';
 }
 
+export interface UpdateContentIdMapMessage {
+  type: 'UPDATE_CONTENT_ID_MAP';
+  entries: { normalizedText: string; expressionId: number; en?: string; imageIndex?: number }[];
+  frameId?: string;
+}
+
+export interface InitStorageMessage {
+  type: 'INIT_STORAGE';
+}
+
+export interface CheckStorageMessage {
+  type: 'CHECK_STORAGE';
+}
+
+export interface AddGuidesMessage {
+  type: 'ADD_GUIDES';
+}
+
+export interface RemoveBgMessage {
+  type: 'REMOVE_BG';
+  frameId?: string;
+}
+
+export interface UpdateCardEnMessage {
+  type: 'UPDATE_CARD_EN';
+  expressionId: string;
+  enText: string;
+  frameId?: string;
+}
+
 // ---- Messages: Sandbox → UI ----
 
 export interface LayoutCreatedMessage {
   type: 'LAYOUT_CREATED';
   placements: CardPlacement[];
   frameId: string;
+  contentIdMap?: ContentIdMap;
 }
 
 export interface RefFrameExportedMessage {
@@ -167,8 +219,9 @@ export interface FrameSelectedMessage {
   type: 'FRAME_SELECTED';
   frameId: string;
   expressionText: string;
-  enTextPairs: { cardId: string; korean: string; en: string }[];
+  enTextPairs: { expressionId: string; korean: string; en: string }[];
   storedImages: StoredImageInfo[];
+  contentIdMap?: ContentIdMap;
 }
 
 export interface RefFrameCheckedMessage {
@@ -187,6 +240,39 @@ export interface ImageThumbnailMessage {
   expressionId: string;
   imageHash: string;
   imageBase64: string;
+}
+
+export interface StorageStatusMessage {
+  type: 'STORAGE_STATUS';
+  ready: boolean;
+  contentIdMap?: ContentIdMap;
+  hasGuides?: boolean;
+}
+
+export interface GuidesStatusMessage {
+  type: 'GUIDES_STATUS';
+  hasGuides: boolean;
+}
+
+export interface CardImageForBgRemovalMessage {
+  type: 'CARD_IMAGE_FOR_BG_REMOVAL';
+  expressionId: string;
+  imageBase64: string;
+}
+
+export interface RemoveBgDoneMessage {
+  type: 'REMOVE_BG_DONE';
+  total: number;
+}
+
+export interface CardSelectedMessage {
+  type: 'CARD_SELECTED';
+  frameId: string;         // parent KeyExpr frame ID
+  expressionId: string;
+  korean: string;
+  en: string;
+  storedImages: StoredImageInfo[];
+  activeImageHash?: string;
 }
 
 export interface ErrorMessage {
@@ -209,7 +295,13 @@ export type UIToSandboxMessage =
   | CleanupTempMessage
   | NewPageMessage
   | CheckRefFrameMessage
-  | CleanupGuidesMessage;
+  | CleanupGuidesMessage
+  | UpdateContentIdMapMessage
+  | InitStorageMessage
+  | CheckStorageMessage
+  | AddGuidesMessage
+  | RemoveBgMessage
+  | UpdateCardEnMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -222,4 +314,9 @@ export type SandboxToUIMessage =
   | NewPageCreatedMessage
   | RefFrameCheckedMessage
   | ImageThumbnailMessage
+  | StorageStatusMessage
+  | GuidesStatusMessage
+  | CardSelectedMessage
+  | CardImageForBgRemovalMessage
+  | RemoveBgDoneMessage
   | ErrorMessage;

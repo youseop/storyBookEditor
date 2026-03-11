@@ -1,35 +1,28 @@
 // Frame dimensions
 export const FRAME_WIDTH = 7452;
-export const FRAME_HEIGHT = 4034;
+export const FRAME_HEIGHT = 3780;
 export const HALF_PAGE_WIDTH = FRAME_WIDTH / 2; // 3726
 
 // Title area
 export const TITLE_HEIGHT = 500;
 
-// Grid margins
-export const GRID_MARGIN_TOP = 200;
-export const GRID_MARGIN_BOTTOM = 150;
-export const GRID_MARGIN_LEFT = 200;
-export const GRID_MARGIN_RIGHT = 200;
-export const GRID_CENTER_GAP = 200; // gap at center fold
-
-// Cell dimensions
+// Cell dimensions (fixed)
 export const GRID_COLS = 8;
 export const GRID_ROWS = 8;
 export const CELL_GAP = 40;
+export const CELL_WIDTH = 380;
+export const CELL_HEIGHT = 363;
 export const DEFAULT_COL_SPAN = 2;
 export const DEFAULT_ROW_SPAN = 2;
 export const TALL_ROW_SPAN = 4; // rowSpan for 3+ line cards
 export const MAX_EXPANSION = 2; // max cells a card can grow during row expansion
 export const MULTILINE_THRESHOLD = 3; // lines >= this triggers tall card
 
-// Calculated cell size
-export const CELL_WIDTH = Math.floor(
-  (HALF_PAGE_WIDTH - GRID_MARGIN_LEFT - GRID_MARGIN_RIGHT - CELL_GAP * (GRID_COLS - 1)) / GRID_COLS
-); // ≈ 801
-export const CELL_HEIGHT = Math.floor(
-  (FRAME_HEIGHT - TITLE_HEIGHT - GRID_MARGIN_TOP - GRID_MARGIN_BOTTOM - CELL_GAP * (GRID_ROWS - 1)) / GRID_ROWS
-); // ≈ 766
+// Grid centering: center the grid on the page
+const TOTAL_GRID_WIDTH = GRID_COLS * CELL_WIDTH + (GRID_COLS - 1) * CELL_GAP;
+const TOTAL_GRID_HEIGHT = GRID_ROWS * CELL_HEIGHT + (GRID_ROWS - 1) * CELL_GAP;
+export const GRID_MARGIN_LEFT = Math.round((HALF_PAGE_WIDTH - TOTAL_GRID_WIDTH) / 2);
+export const GRID_START_Y = Math.round((FRAME_HEIGHT - TOTAL_GRID_HEIGHT) / 2);
 
 // Card styling
 export const CARD_IMAGE_RATIO = 0.67; // top 67% for image
