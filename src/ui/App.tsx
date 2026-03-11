@@ -16,6 +16,7 @@ import ExpressionInput from './components/ExpressionInput';
 import SettingsPanel from './components/SettingsPanel';
 import ImageGallery from './components/ImageGallery';
 import GenerationProgress from './components/GenerationProgress';
+import MultiCardPanel from './components/MultiCardPanel';
 import { usePluginMessage, postToPlugin } from './hooks/useFigmaMessages';
 import { useGeminiApi } from './hooks/useGeminiApi';
 
@@ -59,6 +60,14 @@ const App: React.FC = () => {
   const [cardRegenPrompt, setCardRegenPrompt] = useState('');
   const [isCardRegenerating, setIsCardRegenerating] = useState(false);
   const [isCardRetranslating, setIsCardRetranslating] = useState(false);
+
+  // Multi-card selection view
+  const [selectedCards, setSelectedCards] = useState<Array<{
+    expressionId: string;
+    korean: string;
+    en: string;
+  }> | null>(null);
+  const [multiCardFrameId, setMultiCardFrameId] = useState<string>('');
 
   // English translations map: expressionId string → enLines
   const [enLinesMap, setEnLinesMap] = useState<Map<string, string[]>>(new Map());
@@ -260,6 +269,7 @@ const App: React.FC = () => {
       }
 
       case 'CARD_SELECTED': {
+        setSelectedCards(null);
         setSelectedCard({
           frameId: msg.frameId,
           expressionId: msg.expressionId,
@@ -286,8 +296,37 @@ const App: React.FC = () => {
         break;
       }
 
+      case 'CARDS_SELECTED': {
+        setSelectedCard(null);
+        setSelectedCards(msg.cards);
+        setMultiCardFrameId(msg.frameId);
+        setActiveFrameId(msg.frameId);
+        // Restore stored images for selected expressions
+        if (msg.storedImages && msg.storedImages.length > 0) {
+          setGeneratedImages(prev => {
+            const next = new Map(prev);
+            for (const img of msg.storedImages) {
+              const existing = next.get(img.expressionId) || [];
+              if (!existing.some(e => e.imageHash === img.imageHash)) {
+                existing.push({
+                  expressionId: img.expressionId,
+                  imageHash: img.imageHash,
+                  prompt: img.prompt,
+                  isActive: img.isActive,
+                  index: img.index,
+                });
+                next.set(img.expressionId, [...existing]);
+              }
+            }
+            return next;
+          });
+        }
+        break;
+      }
+
       case 'FRAME_SELECTED': {
         setSelectedCard(null);
+        setSelectedCards(null);
         setActiveFrameId(msg.frameId);
         setExpressions(msg.expressionText);
         // Restore content→ID mapping from storage (parser uses this for expressionId assignment)
@@ -687,6 +726,120 @@ const App: React.FC = () => {
     }
   };
 
+  // Multi-card: batch re-translate
+  const handleMultiCardRetranslate = async (cards: Array<{ expressionId: string; korean: string }>) => {
+    if (!settings.apiKey) return;
+    setError(null);
+
+    try {
+      const translateInput = cards.map(c => ({
+        id: c.expressionId,
+        koreanText: c.korean.split('\n').map(l => l.split('=')[0].trim()).join(' '),
+      }));
+      const translationMap = await gemini.translate(settings.apiKey, translateInput);
+
+      // Update selectedCards with new translations
+      setSelectedCards(prev => prev?.map(c => {
+        const en = translationMap.get(c.expressionId);
+        return en ? { ...c, en: en.join(' ') } : c;
+      }) || null);
+
+      // Update canvas
+      const updates = cards.map(c => {
+        const en = translationMap.get(c.expressionId);
+        return { expressionId: c.expressionId, enText: en ? en.join(' ') : '' };
+      }).filter(u => u.enText);
+
+      postToPlugin({
+        type: 'UPDATE_CARD_TRANSLATIONS',
+        cards: updates,
+        frameId: multiCardFrameId || undefined,
+      });
+
+      // Update contentIdMap
+      const entries = cards.map(c => {
+        const en = translationMap.get(c.expressionId);
+        if (!en) return null;
+        const koreanLines = c.korean.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        return {
+          normalizedText: normalizeText(koreanLines),
+          expressionId: parseInt(c.expressionId),
+          en: en.join(' '),
+        };
+      }).filter(Boolean) as { normalizedText: string; expressionId: number; en: string }[];
+
+      if (entries.length > 0) {
+        postToPlugin({
+          type: 'UPDATE_CONTENT_ID_MAP',
+          entries,
+          frameId: multiCardFrameId || undefined,
+        });
+      }
+    } catch (err: any) {
+      setError('Batch translation failed: ' + (err.message || String(err)));
+    }
+  };
+
+  // Multi-card: batch image regeneration
+  const handleMultiCardRegenerate = async (
+    cards: Array<{ expressionId: string; korean: string; prompt: string }>
+  ) => {
+    if (!settings.apiKey) return;
+    setError(null);
+
+    try {
+      // Ensure reference image
+      if (settings.refFrameName && !refImageRef.current) {
+        postToPlugin({ type: 'EXPORT_REF_FRAME', frameName: settings.refFrameName });
+        await new Promise<void>(resolve => {
+          const check = setInterval(() => { if (refImageRef.current) { clearInterval(check); resolve(); } }, 200);
+          setTimeout(() => { clearInterval(check); resolve(); }, 10000);
+        });
+      }
+
+      for (const card of cards) {
+        const lines = card.korean.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const exprCard: ExpressionCard = {
+          id: card.expressionId,
+          lines,
+          colSpan: 2,
+          rowSpan: 2,
+        };
+        const existingCount = generatedImages.get(card.expressionId)?.length || 0;
+        const defaultPrompt = lines.map(l => l.split('=')[0].trim()).join(' ');
+        const customPrompt = card.prompt !== defaultPrompt ? card.prompt : undefined;
+        await gemini.generateSingle(
+          settings.apiKey, exprCard, customPrompt,
+          refImageRef.current, existingCount,
+          multiCardFrameId || undefined
+        );
+      }
+    } catch (err: any) {
+      setError('Batch image generation failed: ' + (err.message || String(err)));
+    }
+  };
+
+  // Multi-card: swap image
+  const handleMultiCardSwap = (expressionId: string, imageHash: string) => {
+    postToPlugin({
+      type: 'SWAP_IMAGE',
+      expressionId,
+      newImageHash: imageHash,
+      frameId: multiCardFrameId || undefined,
+    });
+    setGeneratedImages(prev => {
+      const next = new Map(prev);
+      const images = next.get(expressionId);
+      if (images) {
+        next.set(expressionId, images.map(img => ({
+          ...img,
+          isActive: img.imageHash === imageHash,
+        })));
+      }
+      return next;
+    });
+  };
+
   const handleNewPage = () => {
     setError(null);
     postToPlugin({
@@ -742,7 +895,20 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {selectedCard ? (
+      {selectedCards ? (
+        /* ── Multi-Card Panel ── */
+        <MultiCardPanel
+          cards={selectedCards}
+          frameId={multiCardFrameId}
+          generatedImages={generatedImages}
+          apiKey={settings.apiKey}
+          refFrameName={settings.refFrameName}
+          onRetranslate={handleMultiCardRetranslate}
+          onRegenerateImages={handleMultiCardRegenerate}
+          onSwap={handleMultiCardSwap}
+          onClose={() => setSelectedCards(null)}
+        />
+      ) : selectedCard ? (
         /* ── Card Detail View ── */
         <>
           <div className="tab-content card-detail">
