@@ -105,6 +105,18 @@ export async function generateImage(
   };
 }
 
+/**
+ * Remove background from an image using Gemini API.
+ */
+export async function removeImageBackground(
+  apiKey: string,
+  imageBase64: string,
+  signal?: AbortSignal,
+): Promise<GeminiImageResult> {
+  const prompt = 'Remove the background from this image. Replace it with a pure white background. Keep the main subject intact with all its details, colors, and proportions preserved. Do not add any text.';
+  return generateImage(apiKey, prompt, imageBase64, signal);
+}
+
 export class RateLimitError extends Error {
   public responseBody: string;
   constructor(message: string, responseBody: string) {
@@ -168,7 +180,7 @@ export function getImageAspectRatio(colSpan: number, rowSpan: number): string {
  * Build the Korean prompt for a given expression.
  */
 export function buildImagePrompt(expressionLines: string[], colSpan?: number, rowSpan?: number, customNote?: string): string {
-  var expression = expressionLines.join(' ');
+  var expression = expressionLines.map(function(l) { return l.split('=')[0].trim(); }).join(' ');
   var prompt = '흰 바탕 위에 "' + expression + '"을(를) 직관적으로 잘 나타내는 이미지를 그려줘. 첨부한 레퍼런스 이미지와 같은 스타일로 그려줘. 텍스트 없이 이미지만 생성해줘.';
   if (customNote) {
     prompt += ' 추가 요청: ' + customNote;
@@ -210,12 +222,16 @@ export async function translateExpressions(
 
   var prompt = `다음 한국어 표현들을 영어로 번역해줘. JSON 형식으로만 응답해줘.
 각 번역의 첫 글자는 대문자로 해줘.
+Use standard sentence capitalization — only capitalize the first word and proper nouns.
 한국어 문장에 주어가 빠져 있으면 문맥에 맞는 적절한 주어를 추측해서 넣어줘.
+단어나 구(phrase) 형태의 입력은 마침표를 붙이지 마. 문장 형태일 때만 마침표를 붙여.
+단일 단어나 짧은 명사구에는 a, an, the 같은 관사를 붙이지 마. (예: "노트북" → "Laptop", "사과" → "Apple")
+중요: 입력 배열의 각 항목은 하나의 표현이야. 한 항목 안에 여러 문장이 있어도 하나의 번역으로 합쳐서 반환해줘. 반드시 입력 배열과 같은 개수의 번역을 반환해야 해.
 
-입력:
+입력 (${koreanTexts.length}개):
 ${JSON.stringify({ expressions: koreanTexts })}
 
-응답 형식 (정확히 이 형식으로):
+응답 형식 (정확히 ${koreanTexts.length}개의 번역):
 {"translations": ["Translation 1", "Translation 2", ...]}`;
 
   var requestBody = {
@@ -262,10 +278,33 @@ ${JSON.stringify({ expressions: koreanTexts })}
     throw new Error('Invalid translation response format');
   }
 
-  if (parsed.translations.length !== koreanTexts.length) {
-    throw new Error(`Translation count mismatch: expected ${koreanTexts.length}, got ${parsed.translations.length}`);
+  // If Gemini returned more translations than inputs (split multi-sentence items),
+  // merge extras back into the expected count
+  var translations = parsed.translations;
+  if (translations.length > koreanTexts.length) {
+    var merged: string[] = [];
+    // When there's only 1 expected, join all into one
+    if (koreanTexts.length === 1) {
+      merged.push(translations.join(' / '));
+    } else {
+      // Best-effort: distribute extras evenly, give surplus to last item
+      var perItem = Math.floor(translations.length / koreanTexts.length);
+      var remainder = translations.length % koreanTexts.length;
+      var idx = 0;
+      for (var i = 0; i < koreanTexts.length; i++) {
+        var take = perItem + (i === koreanTexts.length - 1 ? remainder : 0);
+        merged.push(translations.slice(idx, idx + take).join(' / '));
+        idx += take;
+      }
+    }
+    translations = merged;
+  } else if (translations.length < koreanTexts.length) {
+    // Pad with empty strings if fewer translations returned
+    while (translations.length < koreanTexts.length) {
+      translations.push('');
+    }
   }
 
   // Ensure first letter is capitalized for each translation
-  return parsed.translations.map(capitalizeFirst);
+  return translations.map(capitalizeFirst);
 }

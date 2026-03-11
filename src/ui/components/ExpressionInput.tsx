@@ -1,13 +1,16 @@
 import React from 'react';
-import type { ExpressionCard } from '../../shared/messageTypes';
+import type { ExpressionCard, ContentIdMap } from '../../shared/messageTypes';
 import { useExpressionParser } from '../hooks/useExpressionParser';
 
 interface ExpressionInputProps {
   value: string;
   onChange: (value: string) => void;
   onParsed: (cards: ExpressionCard[]) => void;
+  onRestoredEn: (restoredEnMap: Map<string, string[]>) => void;
+  onRestoredImage: (restoredImageMap: Map<string, number>) => void;
   onTriggerUpdate: () => void;
-  figmaCardIds?: { cardId: string; korean: string }[];
+  activeFrameId?: string | null;
+  contentIdMap?: ContentIdMap;
 }
 
 const PLACEHOLDER = `Enter expressions separated by blank lines.
@@ -24,13 +27,27 @@ Example:
 
 하얀색 = 흰색`;
 
-const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onParsed, onTriggerUpdate, figmaCardIds }) => {
-  const { cards, cardCount } = useExpressionParser(value, figmaCardIds);
+const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onParsed, onRestoredEn, onRestoredImage, onTriggerUpdate, activeFrameId, contentIdMap }) => {
+  const { cards, cardCount, restoredEnMap, restoredImageMap } = useExpressionParser(value, contentIdMap);
 
   // Sync parsed cards to parent
   React.useEffect(() => {
     onParsed(cards);
   }, [cards, onParsed]);
+
+  // Sync restored English translations from contentIdMap
+  React.useEffect(() => {
+    if (restoredEnMap.size > 0) {
+      onRestoredEn(restoredEnMap);
+    }
+  }, [restoredEnMap, onRestoredEn]);
+
+  // Sync restored image selections from contentIdMap
+  React.useEffect(() => {
+    if (restoredImageMap.size > 0) {
+      onRestoredImage(restoredImageMap);
+    }
+  }, [restoredImageMap, onRestoredImage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === ' ') {
@@ -59,8 +76,15 @@ const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onPa
         rows={16}
         style={{ height: 300 }}
       />
-      <div className="card-count">
-        Parsed: {cardCount} card{cardCount !== 1 ? 's' : ''}
+      <div className="card-count" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {activeFrameId ? (
+          <span style={{ color: 'var(--text-lighter, #999)', fontSize: 10, fontFamily: 'monospace' }}>
+            #{activeFrameId.split(':').pop()}
+          </span>
+        ) : (
+          <span />
+        )}
+        <span>Parsed: {cardCount} card{cardCount !== 1 ? 's' : ''}</span>
       </div>
       {cardCount > 32 && (
         <div className="error-banner" style={{ marginTop: 8 }}>

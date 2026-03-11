@@ -1,13 +1,22 @@
-import { useMemo, useRef } from 'react';
-import type { ExpressionCard } from '../../shared/messageTypes';
+import { useMemo } from 'react';
+import type { ExpressionCard, ContentIdMap } from '../../shared/messageTypes';
 import { DEFAULT_COL_SPAN, DEFAULT_ROW_SPAN } from '../../shared/constants';
 
 interface ParseResult {
   cards: ExpressionCard[];
   cardCount: number;
+  /** English translations restored from contentIdMap: expressionId string → enLines */
+  restoredEnMap: Map<string, string[]>;
+  /** Preferred image index restored from contentIdMap: expressionId string → imageIndex */
+  restoredImageMap: Map<string, number>;
 }
 
-let nextCardId = 1;
+/**
+ * Normalize text for content→ID lookup: trim each line, drop empties, join with \n.
+ */
+function normalizeText(lines: string[]): string {
+  return lines.map(l => l.trim()).filter(l => l.length > 0).join('\n');
+}
 
 /**
  * Parses raw text into expression cards.
@@ -15,39 +24,41 @@ let nextCardId = 1;
  * - Double newline (1 blank line) = new card
  * - Triple+ newline (2+ blank lines) = new card with rowBreakBefore
  *
- * @param rawText - Text input with newline-separated cards
- * @param figmaCardIds - When a Figma frame is selected, these are the
- *   authoritative card IDs from Figma's pluginData. Content-based greedy
- *   matching ensures parser IDs stay in sync with what's on the canvas.
+ * expressionId assignment:
+ *   1. contentIdMap — look up normalized Korean text → get existing expressionId
+ *   2. New text — assign next available number
+ *
+ * Cards with the same Korean text share the same expressionId (and thus id).
  */
 export function useExpressionParser(
   rawText: string,
-  figmaCardIds?: { cardId: string; korean: string }[],
+  contentIdMap?: ContentIdMap,
 ): ParseResult {
-  const prevCardsRef = useRef<ExpressionCard[]>([]);
-
   return useMemo(() => {
     if (!rawText.trim()) {
-      prevCardsRef.current = [];
-      return { cards: [], cardCount: 0 };
+      return { cards: [], cardCount: 0, restoredEnMap: new Map(), restoredImageMap: new Map() };
+    }
+
+    // Determine next available expressionId from contentIdMap
+    let nextExprId = 0;
+    if (contentIdMap) {
+      for (const entry of Object.values(contentIdMap)) {
+        if (entry.expressionId >= nextExprId) nextExprId = entry.expressionId + 1;
+      }
     }
 
     // Split by blank-line separators, preserving the separators to count newlines
     const segments = rawText.split(/(\n(?:[ \t]*\n)+)/);
-    const prevCards = prevCardsRef.current;
 
-    // Build content-based ID lookup from Figma card IDs (greedy matching)
-    const figmaUsed = figmaCardIds ? new Array(figmaCardIds.length).fill(false) : [];
-
-    const cards: ExpressionCard[] = [];
+    // ── Phase 1: Parse segments into { lines, rowBreakBefore } ──
+    const parsed: { lines: string[]; rowBreakBefore: boolean }[] = [];
 
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
 
-      // Odd indices are separators — skip them (we check them when processing the next content segment)
+      // Odd indices are separators — skip them
       if (i % 2 === 1) continue;
 
-      // Parse lines from this content segment
       const lines = segment
         .split('\n')
         .map((line) => line.trim())
@@ -55,62 +66,76 @@ export function useExpressionParser(
 
       if (lines.length === 0) continue;
 
-      // Check the preceding separator (if any) for triple-newline detection
       let rowBreakBefore = false;
       if (i > 0) {
         const separator = segments[i - 1];
-        // Count actual newline characters in the separator
         const newlineCount = (separator.match(/\n/g) || []).length;
-        // 3+ newlines means 2+ blank lines → row break
         if (newlineCount >= 3) {
           rowBreakBefore = true;
         }
       }
 
-      let id: string | undefined;
+      parsed.push({ lines, rowBreakBefore });
+    }
 
-      // Priority 1: Match against Figma-sourced IDs by content
-      if (figmaCardIds) {
-        const korean = lines.join('\n');
-        const idx = figmaCardIds.findIndex((f, i) => !figmaUsed[i] && f.korean === korean);
-        if (idx !== -1) {
-          figmaUsed[idx] = true;
-          id = figmaCardIds[idx].cardId;
-        }
+    // ── Phase 2: Assign expressionIds ──
+    // Track unique text → expressionId (assigned during this parse)
+    const textToExprId = new Map<string, number>();
+
+    // Seed from contentIdMap
+    if (contentIdMap) {
+      for (const key of Object.keys(contentIdMap)) {
+        textToExprId.set(key, contentIdMap[key].expressionId);
+      }
+    }
+
+    const restoredEnMap = new Map<string, string[]>();
+    const restoredImageMap = new Map<string, number>();
+    const cards: ExpressionCard[] = [];
+
+    for (let i = 0; i < parsed.length; i++) {
+      const normalizedKey = normalizeText(parsed[i].lines);
+
+      let exprId: number;
+      if (textToExprId.has(normalizedKey)) {
+        exprId = textToExprId.get(normalizedKey)!;
+      } else {
+        exprId = nextExprId++;
+        textToExprId.set(normalizedKey, exprId);
       }
 
-      // Priority 2: Reuse previous ID at same position
-      if (!id) {
-        const cardIndex = cards.length;
-        if (cardIndex < prevCards.length) {
-          id = prevCards[cardIndex].id;
-        }
-      }
+      const idStr = String(exprId);
 
-      // Priority 3: Generate new ID
-      if (!id) {
-        id = `card_${nextCardId++}`;
+      // Restore en/imageIndex from contentIdMap (only once per expressionId)
+      if (contentIdMap && contentIdMap[normalizedKey]) {
+        const entry = contentIdMap[normalizedKey];
+        if (entry.en && !restoredEnMap.has(idStr)) {
+          restoredEnMap.set(idStr, [entry.en]);
+        }
+        if (entry.imageIndex !== undefined && !restoredImageMap.has(idStr)) {
+          restoredImageMap.set(idStr, entry.imageIndex);
+        }
       }
 
       const card: ExpressionCard = {
-        id,
-        lines,
+        id: idStr,
+        lines: parsed[i].lines,
         colSpan: DEFAULT_COL_SPAN,
         rowSpan: DEFAULT_ROW_SPAN,
       };
 
-      if (rowBreakBefore) {
+      if (parsed[i].rowBreakBefore) {
         card.rowBreakBefore = true;
       }
 
       cards.push(card);
     }
 
-    prevCardsRef.current = cards;
-
     return {
       cards,
       cardCount: cards.length,
+      restoredEnMap,
+      restoredImageMap,
     };
-  }, [rawText, figmaCardIds]);
+  }, [rawText, contentIdMap]);
 }

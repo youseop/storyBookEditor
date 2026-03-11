@@ -25,9 +25,14 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     );
   }
 
+  // Deduplicate: show one gallery entry per unique expression
+  const uniqueCards = parsedCards.filter((card, idx) =>
+    parsedCards.findIndex(c => c.id === card.id) === idx
+  );
+
   return (
     <div className="image-gallery">
-      {parsedCards.map((card) => {
+      {uniqueCards.map((card) => {
         const images = generatedImages.get(card.id) || [];
         if (images.length === 0) return null;
 

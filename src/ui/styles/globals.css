@@ -267,8 +267,9 @@ textarea::placeholder {
 /* Action Bar */
 .action-bar {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border);
   background: var(--card);
   flex-shrink: 0;
@@ -276,6 +277,13 @@ textarea::placeholder {
 
 .action-bar .btn {
   flex: 1;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+
+.action-row {
+  display: flex;
+  gap: 5px;
 }
 
 /* Card Count */
@@ -525,4 +533,228 @@ textarea::placeholder {
 
 .modal-actions {
   margin-top: 8px;
+}
+
+/* Card Detail View */
+.card-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-detail-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-light);
+  background: var(--bg);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.card-detail-regen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-detail-regen textarea {
+  width: 100%;
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+  min-height: 40px;
+}
+
+.card-detail-texts {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-detail-ko {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.card-detail-en-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-detail-en {
+  font-size: 12px;
+  color: var(--text-light);
+  flex: 1;
+  min-width: 0;
+}
+
+.card-detail-no-images {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.btn-lg {
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-detail-images {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-detail-images-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-light);
+}
+
+.card-detail-thumbs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.card-detail-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.card-detail-thumb:hover {
+  border-color: var(--primary-dark);
+}
+
+.card-detail-thumb.active {
+  border-color: var(--success);
+}
+
+.card-detail-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-detail-thumb-ph {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-light);
+  background: var(--bg);
+}
+
+.card-detail-thumb-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  background: var(--success);
+  color: white;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Translation list */
+.translation-list {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.translation-list-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-light);
+  padding: 6px 10px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.translation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.translation-row:last-child {
+  border-bottom: none;
+}
+
+.translation-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.translation-ko {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.translation-en {
+  color: var(--text-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-light);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
