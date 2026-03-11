@@ -170,6 +170,12 @@ export interface UpdateCardEnMessage {
   frameId?: string;
 }
 
+export interface UpdateCardTranslationsMessage {
+  type: 'UPDATE_CARD_TRANSLATIONS';
+  cards: Array<{ expressionId: string; enText: string }>;
+  frameId?: string;
+}
+
 // ---- Messages: Sandbox → UI ----
 
 export interface LayoutCreatedMessage {
@@ -275,6 +281,17 @@ export interface CardSelectedMessage {
   activeImageHash?: string;
 }
 
+export interface CardsSelectedMessage {
+  type: 'CARDS_SELECTED';
+  frameId: string;
+  cards: Array<{
+    expressionId: string;
+    korean: string;
+    en: string;
+  }>;
+  storedImages: StoredImageInfo[];
+}
+
 export interface ErrorMessage {
   type: 'ERROR';
   message: string;
@@ -301,7 +318,8 @@ export type UIToSandboxMessage =
   | CheckStorageMessage
   | AddGuidesMessage
   | RemoveBgMessage
-  | UpdateCardEnMessage;
+  | UpdateCardEnMessage
+  | UpdateCardTranslationsMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -317,6 +335,7 @@ export type SandboxToUIMessage =
   | StorageStatusMessage
   | GuidesStatusMessage
   | CardSelectedMessage
+  | CardsSelectedMessage
   | CardImageForBgRemovalMessage
   | RemoveBgDoneMessage
   | ErrorMessage;

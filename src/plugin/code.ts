@@ -1167,18 +1167,129 @@ async function handleCardSelected(card: FrameNode, seq: number): Promise<void> {
   }
 }
 
+async function handleMultiCardSelected(cards: FrameNode[], seq: number): Promise<void> {
+  // Sort by position (top→bottom, left→right)
+  var sorted = cards.slice().sort(function(a, b) {
+    if (a.y !== b.y) return a.y - b.y;
+    return a.x - b.x;
+  });
+
+  // Find parent KeyExpr frame from first card
+  var parent = sorted[0].parent;
+  while (parent && parent.type === 'FRAME' && !(parent as FrameNode).name.startsWith(MAIN_FRAME_PREFIX)) {
+    parent = parent.parent;
+  }
+  var frameId = (parent && parent.type === 'FRAME') ? parent.id : '';
+
+  // Extract card data
+  var cardData: Array<{ expressionId: string; korean: string; en: string }> = [];
+  var expressionIds = new Set<string>();
+
+  for (var i = 0; i < sorted.length; i++) {
+    var card = sorted[i];
+    var expressionId = card.getPluginData('expressionId');
+    if (!expressionId) continue;
+
+    var koNode = card.findOne(function(n) { return n.name === 'card-text' && n.type === 'TEXT'; }) as TextNode | null;
+    var enNode = card.findOne(function(n) { return n.name === 'card-text-en' && n.type === 'TEXT'; }) as TextNode | null;
+
+    // Skip duplicate expressionIds
+    if (expressionIds.has(expressionId)) continue;
+    expressionIds.add(expressionId);
+
+    cardData.push({
+      expressionId: expressionId,
+      korean: koNode ? koNode.characters : '',
+      en: enNode ? enNode.characters : '',
+    });
+  }
+
+  // Gather stored images for all selected expressions
+  var storedImages: Array<{ expressionId: string; imageHash: string; prompt: string; index: number; isActive: boolean }> = [];
+  var storageFrame = findStorage();
+  var storageRects: RectangleNode[] = [];
+
+  if (storageFrame) {
+    var activeHashes = new Set<string>();
+    for (var ci = 0; ci < sorted.length; ci++) {
+      var imgRect = sorted[ci].findOne(
+        function(n) { return n.type === 'RECTANGLE' && n.name.startsWith('[image:'); }
+      ) as RectangleNode | null;
+      if (imgRect) {
+        var h = imgRect.getPluginData('imageHash');
+        if (h) activeHashes.add(h);
+      }
+    }
+
+    expressionIds.forEach(function(exprId) {
+      var rects = storageFrame!.findAll(
+        function(n) { return n.type === 'RECTANGLE' && n.getPluginData('expressionId') === exprId && n.getPluginData('imageHash') !== ''; }
+      ) as RectangleNode[];
+      for (var ri = 0; ri < rects.length; ri++) {
+        var rect = rects[ri];
+        var hash = rect.getPluginData('imageHash');
+        storageRects.push(rect);
+        storedImages.push({
+          expressionId: exprId,
+          imageHash: hash,
+          prompt: rect.getPluginData('prompt'),
+          index: parseInt(rect.getPluginData('imageIndex') || '0', 10),
+          isActive: activeHashes.has(hash),
+        });
+      }
+    });
+  }
+
+  figma.ui.postMessage({
+    type: 'CARDS_SELECTED',
+    frameId: frameId,
+    cards: cardData,
+    storedImages: storedImages,
+  });
+
+  // Async: send thumbnails
+  for (var ti = 0; ti < storageRects.length; ti++) {
+    if (seq !== selectionSeq) return;
+    try {
+      var tRect = storageRects[ti];
+      var tBytes = await tRect.exportAsync({ format: 'PNG', constraint: { type: 'WIDTH', value: 160 } });
+      if (seq !== selectionSeq) return;
+      figma.ui.postMessage({
+        type: 'IMAGE_THUMBNAIL',
+        expressionId: tRect.getPluginData('expressionId'),
+        imageHash: tRect.getPluginData('imageHash'),
+        imageBase64: uint8ToBase64(tBytes),
+      });
+    } catch {}
+  }
+}
+
 async function handleSelectionChange(seq: number): Promise<void> {
   const selection = figma.currentPage.selection;
-  if (selection.length !== 1) return;
+  if (selection.length === 0) return;
 
-  const node = selection[0];
+  // Filter for [card:*] frames in selection
+  var cardNodes: FrameNode[] = [];
+  for (var i = 0; i < selection.length; i++) {
+    var n = selection[i];
+    if (n.type === 'FRAME' && n.name.startsWith('[card:')) {
+      cardNodes.push(n as FrameNode);
+    }
+  }
 
-  // Card selected: [card:*] frame
-  if (node.type === 'FRAME' && node.name.startsWith('[card:')) {
-    handleCardSelected(node as FrameNode, seq);
+  if (cardNodes.length === 1) {
+    handleCardSelected(cardNodes[0], seq);
     return;
   }
 
+  if (cardNodes.length > 1) {
+    handleMultiCardSelected(cardNodes, seq);
+    return;
+  }
+
+  // No cards selected — check for KeyExpr frame (single selection only)
+  if (selection.length !== 1) return;
+  const node = selection[0];
   if (node.type !== 'FRAME' || !node.name.startsWith('[KeyExpr] Key Expressions')) return;
 
   // Extract card text from the frame
@@ -1419,6 +1530,49 @@ async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
         figma.ui.postMessage({
           type: 'ERROR',
           message: 'Failed to update card English text',
+          detail: err?.message ?? String(err),
+        });
+      }
+      break;
+    }
+
+    case 'UPDATE_CARD_TRANSLATIONS': {
+      try {
+        const translationCards = (msg as any).cards as Array<{ expressionId: string; enText: string }>;
+        const translationFrameId = (msg as any).frameId as string | undefined;
+
+        var targetFrame: FrameNode | null = null;
+        if (translationFrameId) {
+          try { targetFrame = figma.getNodeById(translationFrameId) as FrameNode; } catch {}
+        }
+        if (!targetFrame) {
+          targetFrame = figma.currentPage.findOne(
+            function(n) { return n.type === 'FRAME' && n.name.startsWith(MAIN_FRAME_PREFIX); }
+          ) as FrameNode | null;
+        }
+        if (!targetFrame) break;
+
+        await figma.loadFontAsync({ family: DEFAULT_FONT_FAMILY, style: 'Bold' });
+
+        for (var tci = 0; tci < translationCards.length; tci++) {
+          var tc = translationCards[tci];
+          var matchingCards = targetFrame.findAll(
+            function(n) { return n.type === 'FRAME' && n.getPluginData('expressionId') === tc.expressionId; }
+          ) as FrameNode[];
+
+          for (var mci = 0; mci < matchingCards.length; mci++) {
+            var enTextNode = matchingCards[mci].findOne(
+              function(n) { return n.name === 'card-text-en' && n.type === 'TEXT'; }
+            ) as TextNode | null;
+            if (enTextNode) {
+              enTextNode.characters = tc.enText;
+            }
+          }
+        }
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to update card translations',
           detail: err?.message ?? String(err),
         });
       }
