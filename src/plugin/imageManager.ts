@@ -6,17 +6,26 @@ import {
 } from '../shared/constants';
 
 /**
- * Creates an image storage frame placed to the right of the main frame.
- * Used to hold generated image variants before they are assigned to cards.
+ * Creates a unified image storage frame for the current page.
+ * Positioned to the right of the first KeyExpr frame found, or at a default location.
  */
-export function createStorageFrame(mainFrame: FrameNode): FrameNode {
-  const keyExprId = mainFrame.getPluginData('keyExprId') || '';
+export function createStorageFrame(): FrameNode {
+  // Find first KeyExpr frame for positioning
+  const firstFrame = figma.currentPage.findOne(
+    (n) => n.type === 'FRAME' && n.name.startsWith('[KeyExpr] Key Expressions')
+  ) as FrameNode | null;
+
   const storageFrame = figma.createFrame();
-  storageFrame.name = `[KeyExpr] Image Storage #${keyExprId}`;
-  storageFrame.setPluginData('keyExprId', keyExprId);
+  storageFrame.name = '[KeyExpr] Storage';
+  storageFrame.setPluginData('storageType', 'unified');
   storageFrame.resize(STORAGE_IMAGE_SIZE * 12, FRAME_HEIGHT);
-  storageFrame.x = mainFrame.x + FRAME_WIDTH + STORAGE_GAP;
-  storageFrame.y = mainFrame.y;
+  if (firstFrame) {
+    storageFrame.x = firstFrame.x + FRAME_WIDTH + STORAGE_GAP;
+    storageFrame.y = firstFrame.y;
+  } else {
+    storageFrame.x = FRAME_WIDTH + STORAGE_GAP;
+    storageFrame.y = 0;
+  }
   storageFrame.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.95, b: 0.95 } }];
   storageFrame.clipsContent = false;
 
@@ -107,7 +116,17 @@ export function assignImage(
   // Find the card frame by expression ID
   var cardFrame = findCardByExpressionId(mainFrame, expressionId);
   if (!cardFrame) return false;
+  return assignImageToCard(cardFrame, expressionId, imageHash);
+}
 
+/**
+ * Core function: assigns image to a specific card frame's [img:*] container.
+ */
+function assignImageToCard(
+  cardFrame: FrameNode,
+  expressionId: string,
+  imageHash: string,
+): boolean {
   // Find the [img:expressionId] frame
   var imgFrame = cardFrame.findOne(
     function(n) { return n.name === `[img:${expressionId}]` && n.type === 'FRAME'; }
@@ -150,6 +169,34 @@ export function assignImage(
   imgFrame.appendChild(imgRect);
 
   return true;
+}
+
+/**
+ * Assigns image to ALL cards matching expressionId across all KeyExpr frames on the page.
+ */
+export function assignImageToAllCards(
+  expressionId: string,
+  imageHash: string,
+): boolean {
+  var allFrames = figma.currentPage.findAll(
+    function(n) { return n.type === 'FRAME' && n.name.startsWith('[KeyExpr] Key Expressions'); }
+  ) as FrameNode[];
+
+  var anySuccess = false;
+  for (var fi = 0; fi < allFrames.length; fi++) {
+    var mainFrame = allFrames[fi];
+    var cards = mainFrame.findAll(
+      function(n) {
+        return n.type === 'FRAME' && n.getPluginData('expressionId') === expressionId;
+      }
+    ) as FrameNode[];
+    for (var ci = 0; ci < cards.length; ci++) {
+      if (assignImageToCard(cards[ci], expressionId, imageHash)) {
+        anySuccess = true;
+      }
+    }
+  }
+  return anySuccess;
 }
 
 /**
