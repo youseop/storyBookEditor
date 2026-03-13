@@ -1,0 +1,357 @@
+import React, { useState, useCallback } from 'react';
+import { postToPlugin } from '../hooks/useFigmaMessages';
+import type { Character } from '../../shared/pipeline';
+
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const TEXT_MODEL = 'gemini-2.5-flash';
+
+interface CharacterPanelProps {
+  storyText: string;
+  characters: Character[];
+  onCharactersChange: (characters: Character[]) => void;
+  apiKey: string;
+}
+
+const CharacterPanel: React.FC<CharacterPanelProps> = ({
+  storyText,
+  characters,
+  onCharactersChange,
+  apiKey,
+}) => {
+  const [localCharacters, setLocalCharacters] = useState<Character[]>(characters);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAnalyze = useCallback(async () => {
+    if (!storyText.trim()) {
+      setError('이야기 텍스트가 없습니다. Step 1에서 입력해주세요.');
+      return;
+    }
+    if (!apiKey) {
+      setError('API Key가 설정되지 않았습니다.');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError(null);
+
+    try {
+      const url = `${GEMINI_API_BASE}/${TEXT_MODEL}:generateContent?key=${apiKey}`;
+      const prompt = `다음 동화에서 등장하는 인물들을 분석해주세요. JSON 배열로 응답해주세요. 각 인물: {name: string, personality: string, appearance: string}. 이야기에 명시되지 않은 외형은 이야기 분위기에 맞게 적절히 제안해주세요.\n\n${storyText}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Gemini API error (${response.status}): ${errorBody}`);
+      }
+
+      const data = await response.json();
+      const candidate = data.candidates?.[0];
+      const textPart = candidate?.content?.parts?.find((p: any) => p.text);
+
+      if (!textPart) {
+        throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
+      }
+
+      const parsed = JSON.parse(textPart.text);
+      const charArray = Array.isArray(parsed) ? parsed : parsed.characters || [];
+
+      const newCharacters: Character[] = charArray.map((c: any) => ({
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
+        name: c.name || '',
+        personality: c.personality || '',
+        appearance: c.appearance || '',
+        confirmed: false,
+      }));
+
+      setLocalCharacters(newCharacters);
+    } catch (err: any) {
+      setError(err.message || '인물 분석 중 오류가 발생했습니다.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [storyText, apiKey]);
+
+  const handleUpdateCharacter = useCallback((id: string, field: keyof Character, value: string) => {
+    setLocalCharacters(prev =>
+      prev.map(c => c.id === id ? { ...c, [field]: value } : c)
+    );
+  }, []);
+
+  const handleDeleteCharacter = useCallback((id: string) => {
+    setLocalCharacters(prev => prev.filter(c => c.id !== id));
+  }, []);
+
+  const handleAddCharacter = useCallback(() => {
+    const newChar: Character = {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
+      name: '',
+      personality: '',
+      appearance: '',
+      confirmed: false,
+    };
+    setLocalCharacters(prev => [...prev, newChar]);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    onCharactersChange(localCharacters);
+    postToPlugin({
+      type: 'SAVE_CHARACTERS',
+      characters: localCharacters,
+    });
+  }, [localCharacters, onCharactersChange]);
+
+  // --- Inline Styles ---
+
+  const containerStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    padding: 12,
+    fontFamily: 'inherit',
+    color: '#333',
+    fontSize: 12,
+  };
+
+  const headerStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 700,
+    marginBottom: 4,
+  };
+
+  const sectionStyle: React.CSSProperties = {
+    border: '1px solid #E5E5E5',
+    borderRadius: 6,
+    padding: 10,
+  };
+
+  const sectionTitleStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#666',
+    marginBottom: 8,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  };
+
+  const outlineBtnStyle: React.CSSProperties = {
+    padding: '6px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#18A0FB',
+    background: '#fff',
+    border: '1px solid #18A0FB',
+    borderRadius: 4,
+    cursor: 'pointer',
+    width: '100%',
+  };
+
+  const primaryBtnStyle: React.CSSProperties = {
+    padding: '8px 16px',
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#fff',
+    background: '#18A0FB',
+    border: 'none',
+    borderRadius: 6,
+    cursor: 'pointer',
+    width: '100%',
+  };
+
+  const disabledBtnStyle: React.CSSProperties = {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  };
+
+  const charCardStyle: React.CSSProperties = {
+    border: '1px solid #E5E5E5',
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 8,
+    position: 'relative',
+  };
+
+  const charHeaderStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '4px 8px',
+    border: '1px solid #E5E5E5',
+    borderRadius: 4,
+    fontSize: 12,
+    color: '#333',
+    boxSizing: 'border-box',
+    outline: 'none',
+  };
+
+  const smallTextareaStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '4px 8px',
+    border: '1px solid #E5E5E5',
+    borderRadius: 4,
+    fontSize: 11,
+    lineHeight: 1.4,
+    color: '#333',
+    boxSizing: 'border-box',
+    outline: 'none',
+    resize: 'vertical',
+    fontFamily: 'inherit',
+  };
+
+  const fieldLabelStyle: React.CSSProperties = {
+    fontSize: 10,
+    color: '#999',
+    marginBottom: 2,
+    marginTop: 6,
+  };
+
+  const deleteBtnStyle: React.CSSProperties = {
+    width: 22,
+    height: 22,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid #E5E5E5',
+    borderRadius: 4,
+    background: '#fff',
+    color: '#999',
+    cursor: 'pointer',
+    fontSize: 14,
+    lineHeight: 1,
+    flexShrink: 0,
+  };
+
+  const addBtnStyle: React.CSSProperties = {
+    padding: '6px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#666',
+    background: '#FAFAFA',
+    border: '1px dashed #CCC',
+    borderRadius: 4,
+    cursor: 'pointer',
+    width: '100%',
+  };
+
+  const errorStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: '#E53E3E',
+    padding: '4px 0',
+  };
+
+  const emptyStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: '#AAA',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: '16px 0',
+  };
+
+  return (
+    <div style={containerStyle}>
+      <div style={headerStyle}>Step 3: 등장인물 설정</div>
+
+      {/* AI Analysis button */}
+      <button
+        type="button"
+        style={{
+          ...outlineBtnStyle,
+          ...(isAnalyzing || !storyText.trim() ? disabledBtnStyle : {}),
+        }}
+        onClick={handleAnalyze}
+        disabled={isAnalyzing || !storyText.trim()}
+      >
+        {isAnalyzing ? '분석 중...' : 'AI 분석'}
+      </button>
+
+      {error && <div style={errorStyle}>{error}</div>}
+
+      {/* Character list */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>인물 목록 ({localCharacters.length}명)</div>
+
+        {localCharacters.length === 0 && (
+          <div style={emptyStyle}>AI 분석 또는 수동 추가로 인물을 등록하세요.</div>
+        )}
+
+        {localCharacters.map((char) => (
+          <div key={char.id} style={charCardStyle}>
+            <div style={charHeaderStyle}>
+              <input
+                type="text"
+                value={char.name}
+                onChange={(e) => handleUpdateCharacter(char.id, 'name', e.target.value)}
+                style={{ ...inputStyle, fontWeight: 600, flex: 1, marginRight: 8 }}
+                placeholder="이름"
+              />
+              <button
+                type="button"
+                style={deleteBtnStyle}
+                onClick={() => handleDeleteCharacter(char.id)}
+                title="삭제"
+              >
+                x
+              </button>
+            </div>
+
+            <div style={fieldLabelStyle}>성격</div>
+            <textarea
+              rows={2}
+              value={char.personality}
+              onChange={(e) => handleUpdateCharacter(char.id, 'personality', e.target.value)}
+              style={smallTextareaStyle}
+              placeholder="성격 설명..."
+            />
+
+            <div style={fieldLabelStyle}>외형</div>
+            <textarea
+              rows={2}
+              value={char.appearance}
+              onChange={(e) => handleUpdateCharacter(char.id, 'appearance', e.target.value)}
+              style={smallTextareaStyle}
+              placeholder="외형 설명..."
+            />
+          </div>
+        ))}
+
+        <button
+          type="button"
+          style={addBtnStyle}
+          onClick={handleAddCharacter}
+        >
+          + 인물 추가
+        </button>
+      </div>
+
+      {/* Save button */}
+      <button
+        type="button"
+        style={{
+          ...primaryBtnStyle,
+          ...(localCharacters.length === 0 ? disabledBtnStyle : {}),
+        }}
+        onClick={handleSave}
+        disabled={localCharacters.length === 0}
+      >
+        저장
+      </button>
+    </div>
+  );
+};
+
+export default CharacterPanel;

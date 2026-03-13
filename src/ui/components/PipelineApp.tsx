@@ -2,7 +2,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Step, Phase, PipelineState, createInitialPipelineState, getPhaseForStep, STEP_INFO } from '../../shared/pipeline';
 import type { SandboxToUIMessage } from '../../shared/messageTypes';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
+import type { Character } from '../../shared/pipeline';
 import StepNavigation from './StepNavigation';
+import StyleSetupPanel from './StyleSetupPanel';
+import KeyColorPanel from './KeyColorPanel';
+import CharacterPanel from './CharacterPanel';
+import CharacterImagePanel from './CharacterImagePanel';
 import PageSplitPanel from './PageSplitPanel';
 import type { ParsedPage } from './PageSplitPanel';
 
@@ -93,19 +98,95 @@ const PipelineApp: React.FC = () => {
     }));
   }, []);
 
+  // Phase 1 handlers
+  const handleStyleDescriptionChange = useCallback((desc: string) => {
+    setPipelineState(prev => ({
+      ...prev,
+      styleGuide: { ...prev.styleGuide, styleDescription: desc },
+    }));
+  }, []);
+
+  const handleReferenceImageChange = useCallback((base64: string) => {
+    setPipelineState(prev => ({
+      ...prev,
+      styleGuide: { ...prev.styleGuide, referenceImageBase64: base64 },
+    }));
+  }, []);
+
+  const handleColorsChange = useCallback((colorA: string, colorB: string) => {
+    setPipelineState(prev => ({
+      ...prev,
+      keyColors: { colorA, colorB },
+    }));
+  }, []);
+
+  const handleCharactersChange = useCallback((characters: Character[]) => {
+    setPipelineState(prev => ({ ...prev, characters }));
+  }, []);
+
+  const handleCharacterImageSelect = useCallback((characterId: string, imageBase64: string) => {
+    setPipelineState(prev => ({
+      ...prev,
+      characters: prev.characters.map(c =>
+        c.id === characterId ? { ...c, referenceImageBase64: imageBase64, confirmed: true } : c
+      ),
+    }));
+  }, []);
+
+  // Get API key from pipeline state or localStorage
+  const [apiKey, setApiKey] = useState('');
+  useEffect(() => {
+    postToPlugin({ type: 'LOAD_API_KEY' });
+  }, []);
+  usePluginMessage(useCallback((msg: SandboxToUIMessage) => {
+    if (msg.type === 'API_KEY_LOADED') {
+      setApiKey(msg.apiKey);
+    }
+  }, []));
+
   // Render the appropriate panel for current step
   const renderStepPanel = () => {
     const step = pipelineState.currentStep;
 
     switch (step) {
       case Step.STYLE_SETUP:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <StyleSetupPanel
+            storyText={pipelineState.storyText}
+            onStoryTextChange={handleStoryTextChange}
+            styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            onStyleDescriptionChange={handleStyleDescriptionChange}
+            referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
+            onReferenceImageChange={handleReferenceImageChange}
+            apiKey={apiKey}
+          />
+        );
       case Step.KEY_COLOR:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <KeyColorPanel
+            colorA={pipelineState.keyColors.colorA}
+            colorB={pipelineState.keyColors.colorB}
+            onColorsChange={handleColorsChange}
+          />
+        );
       case Step.CHARACTERS:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <CharacterPanel
+            storyText={pipelineState.storyText}
+            characters={pipelineState.characters}
+            onCharactersChange={handleCharactersChange}
+            apiKey={apiKey}
+          />
+        );
       case Step.CHARACTER_IMAGES:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <CharacterImagePanel
+            characters={pipelineState.characters}
+            onCharacterImageSelect={handleCharacterImageSelect}
+            styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            apiKey={apiKey}
+          />
+        );
       case Step.PAGE_SPLIT:
         return (
           <PageSplitPanel
