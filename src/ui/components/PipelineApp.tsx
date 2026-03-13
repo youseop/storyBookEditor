@@ -42,6 +42,12 @@ const PipelineApp: React.FC = () => {
       case 'PIPELINE_STATE_LOADED':
         if (msg.state) {
           setPipelineState(msg.state);
+          // Sync progress display on canvas when state is restored
+          postToPlugin({
+            type: 'UPDATE_PROGRESS_DISPLAY',
+            currentStep: msg.state.currentStep,
+            completedSteps: msg.state.completedSteps,
+          });
         }
         setIsLoading(false);
         break;
@@ -55,15 +61,24 @@ const PipelineApp: React.FC = () => {
     }
   }, []));
 
+  // Sync progress display on Figma canvas whenever step changes
+  const updateProgressOnCanvas = useCallback((state: PipelineState) => {
+    postToPlugin({
+      type: 'UPDATE_PROGRESS_DISPLAY',
+      currentStep: state.currentStep,
+      completedSteps: state.completedSteps,
+    });
+  }, []);
+
   // Navigation
   const handleStepChange = useCallback((step: Step) => {
     setPipelineState(prev => {
       const next = { ...prev, currentStep: step };
-      // Auto-save state
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      updateProgressOnCanvas(next);
       return next;
     });
-  }, []);
+  }, [updateProgressOnCanvas]);
 
   const handleNextStep = useCallback(() => {
     setPipelineState(prev => {
@@ -78,9 +93,10 @@ const PipelineApp: React.FC = () => {
         completedSteps,
       };
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      updateProgressOnCanvas(next);
       return next;
     });
-  }, []);
+  }, [updateProgressOnCanvas]);
 
   const handlePrevStep = useCallback(() => {
     setPipelineState(prev => {
@@ -88,9 +104,10 @@ const PipelineApp: React.FC = () => {
       if (prevStepNum < 1) return prev;
       const next = { ...prev, currentStep: prevStepNum as Step };
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      updateProgressOnCanvas(next);
       return next;
     });
-  }, []);
+  }, [updateProgressOnCanvas]);
 
   // Step-specific data handlers
   const handleStoryTextChange = useCallback((text: string) => {

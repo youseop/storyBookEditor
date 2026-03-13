@@ -1087,13 +1087,145 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
-    case 'SAVE_STYLE_GUIDE':
-    case 'SAVE_CHARACTERS':
-    case 'SAVE_KEY_COLORS':
-    case 'STORE_SCENE_IMAGE':
-    case 'SELECT_SCENE_IMAGE':
+    case 'SAVE_STYLE_GUIDE': {
+      try {
+        const dataNode = getOrCreatePipelineDataNode();
+        dataNode.setPluginData('pk-style-description', msg.description);
+        if (msg.imageBytes && msg.imageBytes.length > 0) {
+          // Store image reference in pipeline data (actual image stored in Figma)
+          const image = figma.createImage(new Uint8Array(msg.imageBytes));
+          dataNode.setPluginData('pk-style-image-hash', image.hash);
+        }
+        figma.ui.postMessage({ type: 'STYLE_GUIDE_SAVED', success: true });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save style guide',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_CHARACTERS': {
+      try {
+        const dataNode = getOrCreatePipelineDataNode();
+        dataNode.setPluginData(PLUGIN_DATA_KEYS.characterData, JSON.stringify(msg.characters));
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save characters',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_KEY_COLORS': {
+      try {
+        const dataNode = getOrCreatePipelineDataNode();
+        dataNode.setPluginData('pk-key-color-a', msg.colorA);
+        dataNode.setPluginData('pk-key-color-b', msg.colorB);
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save key colors',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
     case 'PLACE_DIALOGUE': {
-      // Placeholder handlers - will be implemented in future milestones
+      try {
+        const frameName = FRAME_NAMES.part1Page(msg.pageIndex);
+        const frame = figma.currentPage.findOne(
+          (n) => n.name === frameName && n.type === 'FRAME'
+        ) as FrameNode | null;
+        if (!frame) throw new Error(`Frame not found: ${frameName}`);
+
+        // Load font
+        let fontFamily = DEFAULT_FONT_FAMILY;
+        try {
+          await figma.loadFontAsync({ family: fontFamily, style: 'Regular' });
+        } catch {
+          fontFamily = 'Inter';
+          await figma.loadFontAsync({ family: fontFamily, style: 'Regular' });
+        }
+
+        // Get text blocks from page data
+        const textBlocksRaw = frame.getPluginData(PLUGIN_DATA_KEYS.textBlocks);
+        if (!textBlocksRaw) break;
+        const textBlocks = JSON.parse(textBlocksRaw) as string[][];
+
+        // Remove existing dialogue nodes
+        const existingDialogue = frame.findAll(
+          (n) => n.name.startsWith('dialogue-')
+        );
+        for (const e of existingDialogue) e.remove();
+
+        // Place dialogue text with selected template
+        const template = msg.template;
+        let dialogueY = STORY_PAGE_HEIGHT * 0.65; // Start at 65% height
+
+        for (let blockIdx = 0; blockIdx < textBlocks.length; blockIdx++) {
+          const block = textBlocks[blockIdx];
+          const text = block.join('\n');
+
+          // Create dialogue container based on template
+          const dialogueGroup = figma.createFrame();
+          dialogueGroup.name = `dialogue-${blockIdx}`;
+          dialogueGroup.fills = [];
+
+          const padding = 40;
+          const dialogueWidth = STORY_PAGE_WIDTH * 0.8;
+
+          if (template === 'border-a' || template === 'border-b') {
+            const borderColor = template === 'border-a'
+              ? hexToFigmaColor(msg.template === 'border-a' ? '#FFCF66' : '#FFF69B')
+              : hexToFigmaColor('#FFF69B');
+            dialogueGroup.strokes = [{ type: 'SOLID', color: borderColor }];
+            dialogueGroup.strokeWeight = 8;
+            dialogueGroup.cornerRadius = 24;
+            dialogueGroup.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, opacity: 0.85 }];
+          } else {
+            // Plain - no border, semi-transparent white background
+            dialogueGroup.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, opacity: 0.7 }];
+            dialogueGroup.cornerRadius = 16;
+          }
+
+          const textNode = figma.createText();
+          textNode.fontName = { family: fontFamily, style: 'Regular' };
+          textNode.characters = text;
+          textNode.fontSize = 140;
+          textNode.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          textNode.textAlignHorizontal = 'CENTER';
+          textNode.resize(dialogueWidth - padding * 2, 200);
+          textNode.textAutoResize = 'HEIGHT';
+          textNode.x = padding;
+          textNode.y = padding;
+          dialogueGroup.appendChild(textNode);
+
+          dialogueGroup.resize(dialogueWidth, textNode.height + padding * 2);
+          dialogueGroup.x = (STORY_PAGE_WIDTH - dialogueWidth) / 2;
+          dialogueGroup.y = dialogueY;
+          frame.appendChild(dialogueGroup);
+
+          dialogueY += dialogueGroup.height + 60;
+        }
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to place dialogue',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'STORE_SCENE_IMAGE':
+    case 'SELECT_SCENE_IMAGE': {
+      // Image storage/selection - will be fully implemented with Gemini Image API
       console.log(`Pipeline message received but not yet implemented: ${msg.type}`);
       return true;
     }
