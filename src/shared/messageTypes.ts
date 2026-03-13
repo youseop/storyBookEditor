@@ -298,6 +298,161 @@ export interface ErrorMessage {
   detail?: string;
 }
 
+// ---- Pipeline Messages: UI → Sandbox ----
+
+export interface SavePipelineStateMessage {
+  type: 'SAVE_PIPELINE_STATE';
+  state: import('./pipeline').PipelineState;
+}
+
+export interface LoadPipelineStateMessage {
+  type: 'LOAD_PIPELINE_STATE';
+}
+
+export interface CreateStoryPagesMessage {
+  type: 'CREATE_STORY_PAGES';
+  pages: Array<{
+    textBlocks: string[][];
+    isEmpty: boolean;
+  }>;
+}
+
+export interface UpdateStoryPagesMessage {
+  type: 'UPDATE_STORY_PAGES';
+  pages: Array<{
+    textBlocks: string[][];
+    isEmpty: boolean;
+  }>;
+}
+
+export interface SaveStyleGuideMessage {
+  type: 'SAVE_STYLE_GUIDE';
+  imageBytes?: number[];
+  description: string;
+}
+
+export interface SaveCharactersMessage {
+  type: 'SAVE_CHARACTERS';
+  characters: import('./pipeline').Character[];
+}
+
+export interface SaveKeyColorsMessage {
+  type: 'SAVE_KEY_COLORS';
+  colorA: string;
+  colorB: string;
+}
+
+export interface NavigateToFrameMessage {
+  type: 'NAVIGATE_TO_FRAME';
+  frameName: string;
+}
+
+export interface CreateSnapshotMessage {
+  type: 'CREATE_SNAPSHOT';
+  label: string;
+}
+
+export interface UpdateProgressDisplayMessage {
+  type: 'UPDATE_PROGRESS_DISPLAY';
+  currentStep: number;
+  completedSteps: number[];
+}
+
+export interface CreatePart2PagesMessage {
+  type: 'CREATE_PART2_PAGES';
+  translations: Array<{
+    pageIndex: number;
+    englishTextBlocks: string[][];
+  }>;
+}
+
+export interface CreatePart3LayoutMessage {
+  type: 'CREATE_PART3_LAYOUT';
+  colorA: string;
+}
+
+export interface StoreSceneImageMessage {
+  type: 'STORE_SCENE_IMAGE';
+  pageIndex: number;
+  imageBytes: number[];
+  variant: number;         // 0-3 (4 variants per scene)
+  backgroundType: 'white' | 'full';
+}
+
+export interface SelectSceneImageMessage {
+  type: 'SELECT_SCENE_IMAGE';
+  pageIndex: number;
+  variant: number;
+}
+
+export interface PlaceDialogueMessage {
+  type: 'PLACE_DIALOGUE';
+  pageIndex: number;
+  template: 'plain' | 'border-a' | 'border-b';
+}
+
+export interface InsertPageNumbersMessage {
+  type: 'INSERT_PAGE_NUMBERS';
+  brandText: string;  // "Pronounce Korean"
+}
+
+export interface GenerateFinalOutputMessage {
+  type: 'GENERATE_FINAL_OUTPUT';
+  outputType: 'spread' | 'individual' | 'both';
+}
+
+// ---- Pipeline Messages: Sandbox → UI ----
+
+export interface PipelineStateLoadedMessage {
+  type: 'PIPELINE_STATE_LOADED';
+  state: import('./pipeline').PipelineState | null;
+}
+
+export interface StoryPagesCreatedMessage {
+  type: 'STORY_PAGES_CREATED';
+  pageFrameIds: string[];
+  pageCount: number;
+}
+
+export interface StyleGuideSavedMessage {
+  type: 'STYLE_GUIDE_SAVED';
+  success: boolean;
+}
+
+export interface SceneImageStoredMessage {
+  type: 'SCENE_IMAGE_STORED';
+  pageIndex: number;
+  variant: number;
+  imageHash: string;
+}
+
+export interface SnapshotCreatedMessage {
+  type: 'SNAPSHOT_CREATED';
+  slot: number;
+  label: string;
+}
+
+export interface Part2PagesCreatedMessage {
+  type: 'PART2_PAGES_CREATED';
+  pageCount: number;
+}
+
+export interface Part3LayoutCreatedMessage {
+  type: 'PART3_LAYOUT_CREATED';
+  pageCount: number;
+}
+
+export interface FinalOutputGeneratedMessage {
+  type: 'FINAL_OUTPUT_GENERATED';
+  spreadPageName?: string;
+  individualPageName?: string;
+}
+
+export interface PageNumbersInsertedMessage {
+  type: 'PAGE_NUMBERS_INSERTED';
+  count: number;
+}
+
 // Union types
 export type UIToSandboxMessage =
   | GenerateLayoutMessage
@@ -319,7 +474,24 @@ export type UIToSandboxMessage =
   | AddGuidesMessage
   | RemoveBgMessage
   | UpdateCardEnMessage
-  | UpdateCardTranslationsMessage;
+  | UpdateCardTranslationsMessage
+  | SavePipelineStateMessage
+  | LoadPipelineStateMessage
+  | CreateStoryPagesMessage
+  | UpdateStoryPagesMessage
+  | SaveStyleGuideMessage
+  | SaveCharactersMessage
+  | SaveKeyColorsMessage
+  | NavigateToFrameMessage
+  | CreateSnapshotMessage
+  | UpdateProgressDisplayMessage
+  | CreatePart2PagesMessage
+  | CreatePart3LayoutMessage
+  | StoreSceneImageMessage
+  | SelectSceneImageMessage
+  | PlaceDialogueMessage
+  | InsertPageNumbersMessage
+  | GenerateFinalOutputMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -338,4 +510,13 @@ export type SandboxToUIMessage =
   | CardsSelectedMessage
   | CardImageForBgRemovalMessage
   | RemoveBgDoneMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | PipelineStateLoadedMessage
+  | StoryPagesCreatedMessage
+  | StyleGuideSavedMessage
+  | SceneImageStoredMessage
+  | SnapshotCreatedMessage
+  | Part2PagesCreatedMessage
+  | Part3LayoutCreatedMessage
+  | FinalOutputGeneratedMessage
+  | PageNumbersInsertedMessage;

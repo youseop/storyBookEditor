@@ -2,6 +2,7 @@ import { createMainFrame, hexToFigmaColor } from './frameBuilder';
 import { buildCardGrid, applyCardLayout } from './cardGridBuilder';
 import { createStorageFrame, storeImage, assignImage, assignImageToAllCards, swapImage } from './imageManager';
 import { exportRefFrame } from './exportHelper';
+import { handlePipelineMessage } from './pipelineHandler';
 import type {
   UIToSandboxMessage,
   PluginSettings,
@@ -1409,6 +1410,10 @@ let buildInProgress = false;
 let pendingBuildMsg: UIToSandboxMessage | null = null;
 
 async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
+  // Try pipeline handler first
+  const handled = await handlePipelineMessage(msg);
+  if (handled) return;
+
   switch (msg.type) {
     case 'GENERATE_LAYOUT': {
       try {

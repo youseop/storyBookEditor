@@ -54,3 +54,40 @@ export const CARD_EN_FONT_SIZE = 66;
 export const CARD_EN_PLACEHOLDER = '영어 번역';
 export const TITLE_FONT_FAMILY = 'Inter';
 export const TITLE_FONT_SIZE = 72;
+
+// ===== Story Page Constants (Pipeline) =====
+
+// Story page dimensions (Part 1, 2, 3 content pages)
+export const STORY_PAGE_WIDTH = 3726;
+export const STORY_PAGE_HEIGHT = 3780;
+export const PAGES_PER_ROW = 2;
+export const PAGE_GAP_H = 10;       // horizontal gap between pages in same row
+export const PAGE_GAP_V = 300;      // vertical gap between rows
+
+// Temp text box for Step 5 (page splitting preview)
+export const TEMP_TEXT_BOX_WIDTH = 3600;
+export const TEMP_TEXT_BOX_HEIGHT = 500;
+export const TEMP_TEXT_FONT_SIZE = 200;
+export const TEMP_TEXT_BOX_GAP = 100;  // gap between text boxes in same page
+
+// Cover dimensions (2:1 ratio)
+export const COVER_WIDTH = STORY_PAGE_WIDTH * 2;
+export const COVER_HEIGHT = STORY_PAGE_HEIGHT;
+
+// Key colors
+export const KEY_COLOR_A = '#FFCF66';
+export const KEY_COLOR_B = '#FFF69B';
+
+// Page numbering
+export const PAGE_NUMBER_FONT_SIZE = 48;
+export const PAGE_NUMBER_MARGIN = 80;
+
+// Canvas layout offsets
+export const META_AREA_X = -5000;    // meta area positioned left of main content
+export const META_AREA_Y = 0;
+export const META_SECTION_GAP = 500;
+export const PROGRESS_AREA_Y = -2000; // progress bar above main content
+export const SNAPSHOT_AREA_GAP = 2000; // gap below content for snapshots
+
+// Part separator (empty row between parts)
+export const PART_SEPARATOR_ROWS = 1; // 1 empty row between parts
