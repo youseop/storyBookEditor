@@ -23,6 +23,8 @@ import KeyExprTransImgPanel from './KeyExprTransImgPanel';
 import CoverPanel from './CoverPanel';
 import InnerPagesPanel from './InnerPagesPanel';
 import FinalOutputPanel from './FinalOutputPanel';
+import SettingsDrawer from './SettingsDrawer';
+import LogViewer from './LogViewer';
 
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
@@ -168,6 +170,10 @@ const PipelineApp: React.FC = () => {
 
   // Key expressions for Part 3 (pageIndex → expression cards)
   const [keyExpressions, setKeyExpressions] = useState<Record<number, import('../../shared/messageTypes').ExpressionCard[]>>({});
+
+  // Settings & Log UI state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLogOpen, setIsLogOpen] = useState(false);
 
   // Get API key from pipeline state or localStorage
   const [apiKey, setApiKey] = useState('');
@@ -398,11 +404,36 @@ const PipelineApp: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'Inter, sans-serif' }}>
-      <StepNavigation
-        currentStep={pipelineState.currentStep}
-        completedSteps={pipelineState.completedSteps}
-        onStepChange={handleStepChange}
-      />
+      {/* Top bar with step navigation and settings gear */}
+      <div style={{ position: 'relative' }}>
+        <StepNavigation
+          currentStep={pipelineState.currentStep}
+          completedSteps={pipelineState.completedSteps}
+          onStepChange={handleStepChange}
+        />
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            border: '1px solid #DDD',
+            backgroundColor: '#FFF',
+            cursor: 'pointer',
+            fontSize: 14,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#666',
+          }}
+          title="설정"
+        >
+          &#9881;
+        </button>
+      </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 12px' }}>
         {renderStepPanel()}
@@ -453,6 +484,27 @@ const PipelineApp: React.FC = () => {
           다음 →
         </button>
       </div>
+
+      {/* Settings Drawer */}
+      <SettingsDrawer
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        apiKey={apiKey}
+        onApiKeyChange={(key) => {
+          setApiKey(key);
+          postToPlugin({ type: 'SAVE_API_KEY', apiKey: key });
+        }}
+        onOpenLog={() => {
+          setIsSettingsOpen(false);
+          setIsLogOpen(true);
+        }}
+      />
+
+      {/* Log Viewer */}
+      <LogViewer
+        isOpen={isLogOpen}
+        onClose={() => setIsLogOpen(false)}
+      />
     </div>
   );
 };
