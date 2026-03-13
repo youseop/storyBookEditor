@@ -20,6 +20,9 @@ import Part2PagesPanel from './Part2PagesPanel';
 import Part3LayoutPanel from './Part3LayoutPanel';
 import KeyExprInputPanel from './KeyExprInputPanel';
 import KeyExprTransImgPanel from './KeyExprTransImgPanel';
+import CoverPanel from './CoverPanel';
+import InnerPagesPanel from './InnerPagesPanel';
+import FinalOutputPanel from './FinalOutputPanel';
 
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
@@ -339,11 +342,30 @@ const PipelineApp: React.FC = () => {
           />
         );
       case Step.COVER:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <CoverPanel
+            apiKey={apiKey}
+            styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            keyColorA={pipelineState.keyColors.colorA}
+            keyColorB={pipelineState.keyColors.colorB}
+          />
+        );
       case Step.INNER_PAGES:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <InnerPagesPanel
+            keyColorA={pipelineState.keyColors.colorA}
+            keyColorB={pipelineState.keyColors.colorB}
+          />
+        );
       case Step.FINAL_OUTPUT:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <FinalOutputPanel
+            pages={pipelineState.pages}
+            onComplete={() => {
+              postToPlugin({ type: 'CREATE_SNAPSHOT', label: '최종 완료' });
+            }}
+          />
+        );
       default:
         return <div>Unknown step</div>;
     }
