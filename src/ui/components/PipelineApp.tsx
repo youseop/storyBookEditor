@@ -10,6 +10,11 @@ import CharacterPanel from './CharacterPanel';
 import CharacterImagePanel from './CharacterImagePanel';
 import PageSplitPanel from './PageSplitPanel';
 import type { ParsedPage } from './PageSplitPanel';
+import SceneStructurePanel from './SceneStructurePanel';
+import ImageBulkGenPanel from './ImageBulkGenPanel';
+import ImagePlacementPanel from './ImagePlacementPanel';
+import DialoguePlacementPanel from './DialoguePlacementPanel';
+import ConfirmPanel from './ConfirmPanel';
 
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
@@ -196,15 +201,61 @@ const PipelineApp: React.FC = () => {
           />
         );
       case Step.SCENE_STRUCTURE:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <SceneStructurePanel
+            pages={pipelineState.pages}
+            characters={pipelineState.characters}
+            onPagesUpdate={(pages) => setPipelineState(prev => ({ ...prev, pages }))}
+            apiKey={apiKey}
+          />
+        );
       case Step.IMAGE_BULK_GEN:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <ImageBulkGenPanel
+            pages={pipelineState.pages}
+            characters={pipelineState.characters}
+            styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
+            apiKey={apiKey}
+            onImageSelect={(pageIndex, variant) => {
+              setPipelineState(prev => ({
+                ...prev,
+                pages: prev.pages.map(p =>
+                  p.pageIndex === pageIndex ? { ...p, selectedImageIndex: variant } : p
+                ),
+              }));
+            }}
+          />
+        );
       case Step.IMAGE_PLACEMENT:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <ImagePlacementPanel
+            pages={pipelineState.pages}
+            onImageRegenerate={(pageIndex, prompt, bgType) => {
+              console.log(`Regenerate page ${pageIndex}: ${bgType}, prompt: ${prompt}`);
+            }}
+          />
+        );
       case Step.DIALOGUE_PLACEMENT:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <DialoguePlacementPanel
+            pages={pipelineState.pages}
+            keyColorA={pipelineState.keyColors.colorA}
+            keyColorB={pipelineState.keyColors.colorB}
+          />
+        );
       case Step.PART1_CONFIRM:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <ConfirmPanel
+            partName="Part 1"
+            partNameKo="Part 1 Korean"
+            pageCount={pipelineState.pages.length}
+            onConfirm={() => {
+              postToPlugin({ type: 'CREATE_SNAPSHOT', label: 'Part 1 확정' });
+              handleNextStep();
+            }}
+          />
+        );
       case Step.BULK_TRANSLATE:
         return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
       case Step.PART2_PAGES:
