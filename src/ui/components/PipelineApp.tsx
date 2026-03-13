@@ -17,6 +17,9 @@ import DialoguePlacementPanel from './DialoguePlacementPanel';
 import ConfirmPanel from './ConfirmPanel';
 import BulkTranslatePanel from './BulkTranslatePanel';
 import Part2PagesPanel from './Part2PagesPanel';
+import Part3LayoutPanel from './Part3LayoutPanel';
+import KeyExprInputPanel from './KeyExprInputPanel';
+import KeyExprTransImgPanel from './KeyExprTransImgPanel';
 
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
@@ -142,6 +145,9 @@ const PipelineApp: React.FC = () => {
 
   // Translations for Part 2 (pageIndex → translated text blocks)
   const [translations, setTranslations] = useState<Record<number, string[][]>>({});
+
+  // Key expressions for Part 3 (pageIndex → expression cards)
+  const [keyExpressions, setKeyExpressions] = useState<Record<number, import('../../shared/messageTypes').ExpressionCard[]>>({});
 
   // Get API key from pipeline state or localStorage
   const [apiKey, setApiKey] = useState('');
@@ -290,14 +296,48 @@ const PipelineApp: React.FC = () => {
           />
         );
       case Step.PART3_LAYOUT:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <Part3LayoutPanel
+            pages={pipelineState.pages}
+            keyColorA={pipelineState.keyColors.colorA}
+            onPart3Created={() => console.log('Part 3 layout created')}
+          />
+        );
       case Step.KEY_EXPR_INPUT:
-        // TODO: integrate existing App.tsx functionality here
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} message="기존 Key Expression 기능이 여기에 통합됩니다" />;
+        return (
+          <KeyExprInputPanel
+            pages={pipelineState.pages}
+            keyExpressions={keyExpressions}
+            onExpressionsChange={(pageIndex, cards) => {
+              setKeyExpressions(prev => ({ ...prev, [pageIndex]: cards }));
+            }}
+            apiKey={apiKey}
+          />
+        );
       case Step.KEY_EXPR_TRANSLATE_IMG:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} message="기존 번역/이미지 생성 기능이 여기에 통합됩니다" />;
+        return (
+          <KeyExprTransImgPanel
+            pages={pipelineState.pages}
+            keyExpressions={keyExpressions}
+            onTranslationsUpdate={(pageIndex, cards) => {
+              setKeyExpressions(prev => ({ ...prev, [pageIndex]: cards }));
+            }}
+            styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            apiKey={apiKey}
+          />
+        );
       case Step.PART3_CONFIRM:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <ConfirmPanel
+            partName="Part 3"
+            partNameKo="Part 3 Korean + Key Expressions"
+            pageCount={pipelineState.pages.length}
+            onConfirm={() => {
+              postToPlugin({ type: 'CREATE_SNAPSHOT', label: 'Part 3 확정' });
+              handleNextStep();
+            }}
+          />
+        );
       case Step.COVER:
         return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
       case Step.INNER_PAGES:

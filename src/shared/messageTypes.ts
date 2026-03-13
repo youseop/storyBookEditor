@@ -396,6 +396,14 @@ export interface InsertPageNumbersMessage {
   brandText: string;  // "Pronounce Korean"
 }
 
+export interface ApplyKeyExpressionsMessage {
+  type: 'APPLY_KEY_EXPRESSIONS';
+  expressions: Array<{
+    pageIndex: number;
+    cards: Array<ExpressionCard & { selectedImageIndex: number }>;
+  }>;
+}
+
 export interface GenerateFinalOutputMessage {
   type: 'GENERATE_FINAL_OUTPUT';
   outputType: 'spread' | 'individual' | 'both';
@@ -487,6 +495,7 @@ export type UIToSandboxMessage =
   | UpdateProgressDisplayMessage
   | CreatePart2PagesMessage
   | CreatePart3LayoutMessage
+  | ApplyKeyExpressionsMessage
   | StoreSceneImageMessage
   | SelectSceneImageMessage
   | PlaceDialogueMessage
