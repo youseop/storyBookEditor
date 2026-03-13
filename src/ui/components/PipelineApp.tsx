@@ -15,6 +15,8 @@ import ImageBulkGenPanel from './ImageBulkGenPanel';
 import ImagePlacementPanel from './ImagePlacementPanel';
 import DialoguePlacementPanel from './DialoguePlacementPanel';
 import ConfirmPanel from './ConfirmPanel';
+import BulkTranslatePanel from './BulkTranslatePanel';
+import Part2PagesPanel from './Part2PagesPanel';
 
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
@@ -138,6 +140,9 @@ const PipelineApp: React.FC = () => {
     }));
   }, []);
 
+  // Translations for Part 2 (pageIndex → translated text blocks)
+  const [translations, setTranslations] = useState<Record<number, string[][]>>({});
+
   // Get API key from pipeline state or localStorage
   const [apiKey, setApiKey] = useState('');
   useEffect(() => {
@@ -257,11 +262,33 @@ const PipelineApp: React.FC = () => {
           />
         );
       case Step.BULK_TRANSLATE:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <BulkTranslatePanel
+            pages={pipelineState.pages}
+            onTranslationsChange={setTranslations}
+            apiKey={apiKey}
+          />
+        );
       case Step.PART2_PAGES:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <Part2PagesPanel
+            pages={pipelineState.pages}
+            translations={translations}
+            onPart2Created={() => console.log('Part 2 created')}
+          />
+        );
       case Step.PART2_CONFIRM:
-        return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
+        return (
+          <ConfirmPanel
+            partName="Part 2"
+            partNameKo="Part 2 Korean + English"
+            pageCount={pipelineState.pages.length}
+            onConfirm={() => {
+              postToPlugin({ type: 'CREATE_SNAPSHOT', label: 'Part 2 확정' });
+              handleNextStep();
+            }}
+          />
+        );
       case Step.PART3_LAYOUT:
         return <PlaceholderPanel stepInfo={STEP_INFO[step]} />;
       case Step.KEY_EXPR_INPUT:
