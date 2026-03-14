@@ -474,6 +474,10 @@ export interface SaveCharacterImageMessage {
   imageBytes: number[];
 }
 
+export interface LoadPageImagesMessage {
+  type: 'LOAD_PAGE_IMAGES';
+}
+
 export interface SaveToGalleryMessage {
   type: 'SAVE_TO_GALLERY';
   category: 'style' | 'character' | 'scene' | 'cover';
@@ -496,6 +500,20 @@ export interface StepStatusDetectedMessage {
   detectedSteps: number[];
   details: Record<number, string>;
   snapshotInfo: Array<{ slot: number; label: string; timestamp: string; hasState?: boolean }>;
+}
+
+export interface PageImagesLoadedMessage {
+  type: 'PAGE_IMAGES_LOADED';
+  pages: Array<{
+    pageIndex: number;
+    images: Array<{
+      variant: number;
+      backgroundType: string;
+      imageBytes: number[];
+      imageHash: string;
+    }>;
+    selectedVariant?: number;
+  }>;
 }
 
 export interface GalleryLoadedMessage {
@@ -635,7 +653,8 @@ export type UIToSandboxMessage =
   | SaveToGalleryMessage
   | LoadGalleryMessage
   | DetectStepStatusMessage
-  | RestoreSnapshotMessage;
+  | RestoreSnapshotMessage
+  | LoadPageImagesMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -670,4 +689,5 @@ export type SandboxToUIMessage =
   | BulkTranslationsSavedMessage
   | GalleryLoadedMessage
   | StepStatusDetectedMessage
-  | SnapshotRestoredMessage;
+  | SnapshotRestoredMessage
+  | PageImagesLoadedMessage;

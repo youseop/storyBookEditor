@@ -3097,6 +3097,73 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
+    case 'LOAD_PAGE_IMAGES': {
+      try {
+        const pageImageFrames = figma.currentPage.children.filter(
+          (n) => n.name.startsWith('PK-Meta-Page') && n.name.endsWith('-Images') && n.type === 'FRAME'
+        ) as FrameNode[];
+
+        const result: Array<{
+          pageIndex: number;
+          images: Array<{ variant: number; backgroundType: string; imageBytes: number[]; imageHash: string }>;
+          selectedVariant?: number;
+        }> = [];
+
+        for (const frame of pageImageFrames) {
+          const pageIdx = parseInt(frame.getPluginData(PLUGIN_DATA_KEYS.pageIndex) || '-1');
+          if (pageIdx < 0) continue;
+
+          const imageRects = frame.findAll(
+            (n) => n.name.startsWith('scene-img-') && n.type === 'RECTANGLE'
+          ) as RectangleNode[];
+
+          const images: Array<{ variant: number; backgroundType: string; imageBytes: number[]; imageHash: string }> = [];
+
+          for (const rect of imageRects) {
+            const variant = parseInt(rect.getPluginData('variant') || '0');
+            const backgroundType = rect.getPluginData('backgroundType') || 'white';
+            const imageHash = rect.getPluginData('imageHash') || '';
+            if (!imageHash) continue;
+
+            try {
+              // Export as small thumbnail PNG
+              const exportBytes = await rect.exportAsync({
+                format: 'PNG',
+                constraint: { type: 'SCALE', value: 0.5 },
+              });
+              images.push({
+                variant,
+                backgroundType,
+                imageBytes: Array.from(exportBytes),
+                imageHash,
+              });
+            } catch {
+              // Skip images that can't be exported
+            }
+          }
+
+          images.sort((a, b) => a.variant - b.variant);
+
+          // Check if a variant was previously selected on the page frame
+          const pageName = FRAME_NAMES.part1Page(pageIdx);
+          const pageFrame = figma.currentPage.findOne(
+            (n) => n.name === pageName && n.type === 'FRAME'
+          ) as FrameNode | null;
+          const selectedStr = pageFrame?.getPluginData('selectedVariant');
+          const selectedVariant = selectedStr ? parseInt(selectedStr) : undefined;
+
+          if (images.length > 0) {
+            result.push({ pageIndex: pageIdx, images, selectedVariant });
+          }
+        }
+
+        figma.ui.postMessage({ type: 'PAGE_IMAGES_LOADED', pages: result });
+      } catch (err: any) {
+        figma.ui.postMessage({ type: 'PAGE_IMAGES_LOADED', pages: [] });
+      }
+      return true;
+    }
+
     default:
       return false; // Not a pipeline message
   }

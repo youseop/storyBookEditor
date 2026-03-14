@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { getPageTextPreview } from '../utils/geminiApi';
-import { postToPlugin } from '../hooks/useFigmaMessages';
+import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
 import { base64ToUint8Array } from '../services/geminiService';
 import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
 import type { StoryPage, Character } from '../../shared/pipeline';
@@ -92,6 +92,56 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     generateSceneImages,
     cancel: cancelPipelineGen,
   } = usePipelineImages();
+
+  // Load existing images from Figma on mount
+  useEffect(() => {
+    postToPlugin({ type: 'LOAD_PAGE_IMAGES' });
+  }, []);
+
+  // Handle loaded images from Figma
+  usePluginMessage(useCallback((msg) => {
+    if (msg.type === 'PAGE_IMAGES_LOADED') {
+      const loaded = msg as import('../../shared/messageTypes').PageImagesLoadedMessage;
+      if (!loaded.pages || loaded.pages.length === 0) return;
+
+      setImageStates((prev) => {
+        const next = { ...prev };
+        for (const pageData of loaded.pages) {
+          const existing = next[pageData.pageIndex]?.images || [];
+          // Convert imageBytes to base64 data URL for display
+          const loadedImages: GeneratedImage[] = pageData.images.map((img) => {
+            const bytes = new Uint8Array(img.imageBytes);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+            return {
+              id: `figma_${pageData.pageIndex}_${img.variant}`,
+              base64,
+              prompt: `${img.backgroundType === 'white' ? '흰배경' : '풀배경'} V${img.variant + 1}`,
+              aspectRatio: '3:4',
+            };
+          });
+
+          // Merge: keep existing UI images, add loaded Figma images (skip duplicates)
+          const existingIds = new Set(existing.map((e) => e.id));
+          const newImages = loadedImages.filter((li) => !existingIds.has(li.id));
+
+          const selectedId = pageData.selectedVariant !== undefined
+            ? `figma_${pageData.pageIndex}_${pageData.selectedVariant}`
+            : next[pageData.pageIndex]?.selectedImageId || null;
+
+          next[pageData.pageIndex] = {
+            images: [...existing, ...newImages],
+            selectedImageId: selectedId,
+            customPrompt: next[pageData.pageIndex]?.customPrompt || '',
+          };
+        }
+        return next;
+      });
+    }
+  }, []));
 
   /**
    * Generate images for a set of pages. Each page produces 4 images
