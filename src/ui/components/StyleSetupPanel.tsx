@@ -119,10 +119,21 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
   }, [styleImages, onReferenceImageChange, styleDescription]);
 
   const handleSaveStyleGuide = useCallback(() => {
-    postToPlugin({ type: 'SAVE_STYLE_GUIDE', description: styleDescription });
+    // Include selected image if available
+    const selectedImg = styleImages.find(i => i.id === selectedImageId);
+    if (selectedImg) {
+      const bytes = Uint8Array.from(atob(selectedImg.base64), c => c.charCodeAt(0));
+      postToPlugin({
+        type: 'SAVE_STYLE_GUIDE',
+        description: styleDescription,
+        imageBytes: Array.from(bytes),
+      });
+    } else {
+      postToPlugin({ type: 'SAVE_STYLE_GUIDE', description: styleDescription });
+    }
     // Also save story text to Figma
     postToPlugin({ type: 'SAVE_STORY_TEXT', title: storyTitle, text: storyText });
-  }, [styleDescription, storyTitle, storyText]);
+  }, [styleDescription, storyTitle, storyText, styleImages, selectedImageId]);
 
   const handleHoverImage = useCallback((base64: string | null, event: React.MouseEvent | null) => {
     setHoverImage(base64);

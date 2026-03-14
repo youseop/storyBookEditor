@@ -1694,12 +1694,11 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
-    case 'SAVE_STORY_TEXT' as any: {
+    case 'SAVE_STORY_TEXT': {
       try {
         await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
         await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
-        const m = msg as any;
         const frameName = 'PK-Meta-StoryText';
         const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
         if (old) old.remove();
@@ -1714,10 +1713,10 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
         let yPos = 40;
 
-        if (m.title) {
+        if (msg.title) {
           const titleText = figma.createText();
           titleText.fontName = { family: 'Inter', style: 'Bold' };
-          titleText.characters = m.title;
+          titleText.characters = msg.title;
           titleText.fontSize = 200;
           titleText.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
           titleText.x = 40;
@@ -1728,10 +1727,10 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           yPos += titleText.height + 60;
         }
 
-        if (m.text) {
+        if (msg.text) {
           const bodyText = figma.createText();
           bodyText.fontName = { family: 'Inter', style: 'Regular' };
-          bodyText.characters = m.text;
+          bodyText.characters = msg.text;
           bodyText.fontSize = 50;
           bodyText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
           bodyText.x = 40;
@@ -1842,33 +1841,43 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         charImageMap[msg.characterId] = imageHash;
         dataNode.setPluginData('pk-character-images', JSON.stringify(charImageMap));
 
-        // If character frame exists, add/update image there
-        if (charFrame) {
-          // Find or create image rectangle for this character
-          const imgName = `char-img-${msg.characterId}`;
-          const existingImg = charFrame.findOne(n => n.name === imgName);
-          if (existingImg) existingImg.remove();
-
-          // Find the character's name text node to position image next to it
-          const allChildren = charFrame.findAll(n => n.type === 'TEXT') as TextNode[];
-          const nameNode = allChildren.find(n => n.characters === (msg.characterName || '(이름 없음)'));
-
-          const imgRect = figma.createRectangle();
-          imgRect.name = imgName;
-          imgRect.resize(120, 120);
-          imgRect.cornerRadius = 12;
-          imgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
-
-          if (nameNode) {
-            imgRect.x = 660;
-            imgRect.y = nameNode.y - 10;
-          } else {
-            imgRect.x = 660;
-            imgRect.y = 100;
-          }
-
-          charFrame.appendChild(imgRect);
+        // Find or create characters frame
+        let targetFrame = charFrame;
+        if (!targetFrame) {
+          targetFrame = figma.createFrame();
+          targetFrame.name = charFrameName;
+          targetFrame.x = META_AREA_X;
+          targetFrame.y = META_AREA_Y + META_SECTION_GAP * 2;
+          targetFrame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
+          targetFrame.locked = true;
+          targetFrame.cornerRadius = 16;
+          targetFrame.resize(800, 200);
         }
+
+        // Find or create image rectangle for this character
+        const imgName = `char-img-${msg.characterId}`;
+        const existingImg = targetFrame.findOne(n => n.name === imgName);
+        if (existingImg) existingImg.remove();
+
+        // Find the character's name text node to position image next to it
+        const allChildren = targetFrame.findAll(n => n.type === 'TEXT') as TextNode[];
+        const nameNode = allChildren.find(n => n.characters === (msg.characterName || '(이름 없음)'));
+
+        const imgRect = figma.createRectangle();
+        imgRect.name = imgName;
+        imgRect.resize(120, 120);
+        imgRect.cornerRadius = 12;
+        imgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
+
+        if (nameNode) {
+          imgRect.x = 660;
+          imgRect.y = nameNode.y - 10;
+        } else {
+          imgRect.x = 660;
+          imgRect.y = 100;
+        }
+
+        targetFrame.appendChild(imgRect);
       } catch (err: any) {
         figma.ui.postMessage({
           type: 'ERROR',

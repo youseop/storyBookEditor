@@ -119,8 +119,11 @@ const PipelineApp: React.FC = () => {
         postToPlugin({ type: 'DETECT_STEP_STATUS' });
         break;
       case 'SNAPSHOT_RESTORED':
-        if ((msg as any).success) {
-          // State will be restored via PIPELINE_STATE_LOADED that follows
+        // PIPELINE_STATE_LOADED follows this message from sandbox,
+        // which triggers full state restoration including translations,
+        // keyExpressions, and all separate state variables
+        if (!(msg as any).success) {
+          console.error('Snapshot restore failed');
         }
         break;
       case 'API_KEY_LOADED':
@@ -158,6 +161,9 @@ const PipelineApp: React.FC = () => {
     };
   }, [translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements, keyExprFrameIds, keyExprEnLinesMaps]);
 
+  const buildFullStateRef = useRef(buildFullState);
+  buildFullStateRef.current = buildFullState;
+
   // Debounced auto-save timer ref (declared early for use in cancelPendingSave)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -173,8 +179,8 @@ const PipelineApp: React.FC = () => {
   const handleStepChange = useCallback((step: Step) => {
     setPipelineState(prev => {
       const next = { ...prev, currentStep: step };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       cancelPendingSave();
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
@@ -192,8 +198,8 @@ const PipelineApp: React.FC = () => {
         currentStep: nextStepNum as Step,
         completedSteps,
       };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       cancelPendingSave();
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
@@ -208,8 +214,8 @@ const PipelineApp: React.FC = () => {
         currentStep: prevStepNum as Step,
         completedSteps: prev.completedSteps.filter(s => s < prevStepNum),
       };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       cancelPendingSave();
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
@@ -305,7 +311,7 @@ const PipelineApp: React.FC = () => {
     if (isLoading || !stateLoadedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      const fullState = buildFullState(pipelineState);
+      const fullState = buildFullStateRef.current(pipelineState);
       const stateJson = JSON.stringify(fullState);
       if (stateJson.length > 900000) {
         console.warn(`[Pipeline] State size ${(stateJson.length / 1024).toFixed(0)}KB approaching 1MB limit`);
@@ -319,7 +325,7 @@ const PipelineApp: React.FC = () => {
     pipelineState.currentStep, pipelineState.completedSteps,
     translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements,
     keyExprFrameIds, keyExprEnLinesMaps,
-    isLoading, buildFullState,
+    isLoading,
   ]);
 
   // Render the appropriate panel for current step
