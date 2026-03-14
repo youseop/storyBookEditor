@@ -409,6 +409,15 @@ export interface GenerateFinalOutputMessage {
   outputType: 'spread' | 'individual' | 'both';
 }
 
+export interface CreateInnerPagesMessage {
+  type: 'CREATE_INNER_PAGES';
+  pages: string[];  // list of inner page type identifiers
+  keyColorA: string;
+  keyColorB: string;
+  bookTitle?: string;
+  bookTitleEn?: string;
+}
+
 // ---- Pipeline Messages: Sandbox → UI ----
 
 export interface PipelineStateLoadedMessage {
@@ -461,6 +470,11 @@ export interface PageNumbersInsertedMessage {
   count: number;
 }
 
+export interface InnerPagesCreatedMessage {
+  type: 'INNER_PAGES_CREATED';
+  pageCount: number;
+}
+
 // Union types
 export type UIToSandboxMessage =
   | GenerateLayoutMessage
@@ -500,7 +514,8 @@ export type UIToSandboxMessage =
   | SelectSceneImageMessage
   | PlaceDialogueMessage
   | InsertPageNumbersMessage
-  | GenerateFinalOutputMessage;
+  | GenerateFinalOutputMessage
+  | CreateInnerPagesMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -528,4 +543,5 @@ export type SandboxToUIMessage =
   | Part2PagesCreatedMessage
   | Part3LayoutCreatedMessage
   | FinalOutputGeneratedMessage
-  | PageNumbersInsertedMessage;
+  | PageNumbersInsertedMessage
+  | InnerPagesCreatedMessage;

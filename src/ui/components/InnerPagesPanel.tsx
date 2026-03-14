@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 
 interface InnerPagesPanelProps {
   keyColorA: string;
@@ -12,16 +12,16 @@ interface InnerPageItem {
 }
 
 const DEFAULT_INNER_PAGES: InnerPageItem[] = [
-  { id: 'pronounce-intro', label: 'Pronounce Korean 소개 페이지', checked: true },
+  { id: 'intro', label: 'Pronounce Korean 소개 페이지', checked: true },
   { id: 'index', label: 'Index (목차)', checked: true },
   { id: 'qr-title', label: 'QR Resource 타이틀 페이지', checked: true },
   { id: 'qr-guide', label: 'QR Resource 안내 페이지', checked: true },
-  { id: 'main-characters', label: '메인 등장인물 설명 페이지', checked: true },
+  { id: 'characters', label: '메인 등장인물 설명 페이지', checked: true },
   { id: 'part1-title', label: 'Part 1 타이틀 페이지 ("Korean")', checked: true },
   { id: 'part2-title', label: 'Part 2 타이틀 페이지 ("Korean + English")', checked: true },
   { id: 'part3-title', label: 'Part 3 타이틀 페이지 ("Korean + Key Expressions")', checked: true },
-  { id: 'back-blank', label: '뒷장 여백 페이지', checked: true },
-  { id: 'class-qr', label: '대화 수업 신청 안내 + QR 페이지', checked: true },
+  { id: 'blank-back', label: '뒷장 여백 페이지', checked: true },
+  { id: 'class-info', label: '대화 수업 신청 안내 + QR 페이지', checked: true },
 ];
 
 const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
@@ -29,6 +29,10 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
   keyColorB,
 }) => {
   const [pages, setPages] = useState<InnerPageItem[]>(DEFAULT_INNER_PAGES);
+  const [bookTitle, setBookTitle] = useState('');
+  const [bookTitleEn, setBookTitleEn] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdCount, setCreatedCount] = useState<number | null>(null);
 
   const handleToggle = useCallback((id: string) => {
     setPages((prev) =>
@@ -38,13 +42,42 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
 
   const handleGenerate = useCallback(() => {
     const selected = pages.filter((p) => p.checked);
-    console.log('[InnerPagesPanel] Generate inner pages', {
-      selectedCount: selected.length,
-      selectedIds: selected.map((p) => p.id),
-      keyColorA,
-      keyColorB,
-    });
-  }, [pages, keyColorA, keyColorB]);
+    if (selected.length === 0) return;
+
+    setIsCreating(true);
+    setCreatedCount(null);
+
+    parent.postMessage(
+      {
+        pluginMessage: {
+          type: 'CREATE_INNER_PAGES',
+          pages: selected.map((p) => p.id),
+          keyColorA,
+          keyColorB,
+          bookTitle: bookTitle || undefined,
+          bookTitleEn: bookTitleEn || undefined,
+        },
+      },
+      '*'
+    );
+  }, [pages, keyColorA, keyColorB, bookTitle, bookTitleEn]);
+
+  // Listen for response
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const msg = event.data?.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'INNER_PAGES_CREATED') {
+        setIsCreating(false);
+        setCreatedCount(msg.pageCount);
+      }
+      if (msg.type === 'ERROR' && isCreating) {
+        setIsCreating(false);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [isCreating]);
 
   const selectedCount = pages.filter((p) => p.checked).length;
 
@@ -134,10 +167,10 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
     fontSize: 12,
     fontWeight: 700,
     color: '#fff',
-    background: '#18A0FB',
+    background: isCreating ? '#999' : '#18A0FB',
     border: 'none',
     borderRadius: 6,
-    cursor: selectedCount > 0 ? 'pointer' : 'not-allowed',
+    cursor: selectedCount > 0 && !isCreating ? 'pointer' : 'not-allowed',
     width: '100%',
     opacity: selectedCount > 0 ? 1 : 0.5,
   };
@@ -150,9 +183,69 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
     fontStyle: 'italic',
   };
 
+  const inputLabelStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#555',
+    marginBottom: 4,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '6px 8px',
+    fontSize: 12,
+    border: '1px solid #DDD',
+    borderRadius: 4,
+    boxSizing: 'border-box',
+    outline: 'none',
+    fontFamily: 'inherit',
+  };
+
+  const inputGroupStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    marginBottom: 6,
+  };
+
+  const successStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#1B9E5A',
+    padding: '8px 10px',
+    background: '#EEFBF3',
+    borderRadius: 4,
+    textAlign: 'center',
+  };
+
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>Step 19: 내지 제작</div>
+
+      {/* Book Title Inputs */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>도서 정보</div>
+        <div style={inputGroupStyle}>
+          <label style={inputLabelStyle}>도서 제목 (한글)</label>
+          <input
+            type="text"
+            style={inputStyle}
+            value={bookTitle}
+            onChange={(e) => setBookTitle(e.target.value)}
+            placeholder="예: 프로나운스 코리안"
+          />
+        </div>
+        <div style={inputGroupStyle}>
+          <label style={inputLabelStyle}>도서 제목 (영문)</label>
+          <input
+            type="text"
+            style={inputStyle}
+            value={bookTitleEn}
+            onChange={(e) => setBookTitleEn(e.target.value)}
+            placeholder="예: Pronounce Korean"
+          />
+        </div>
+      </div>
 
       {/* Inner Pages Checklist */}
       <div style={sectionStyle}>
@@ -169,7 +262,7 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
               onClick={() => handleToggle(page.id)}
             >
               <div style={checkboxStyle(page.checked)}>
-                {page.checked && <span style={checkmarkStyle}>✓</span>}
+                {page.checked && <span style={checkmarkStyle}>&#10003;</span>}
               </div>
               <span style={{ color: page.checked ? '#333' : '#999' }}>
                 {page.label}
@@ -184,14 +277,21 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
         {selectedCount}개 내지 선택됨
       </div>
 
+      {/* Success Message */}
+      {createdCount !== null && (
+        <div style={successStyle}>
+          {createdCount}개 내지 프레임이 생성되었습니다
+        </div>
+      )}
+
       {/* Generate Button */}
       <button
         type="button"
         style={primaryBtnStyle}
         onClick={handleGenerate}
-        disabled={selectedCount === 0}
+        disabled={selectedCount === 0 || isCreating}
       >
-        선택 내지 생성
+        {isCreating ? '생성 중...' : '선택 내지 생성'}
       </button>
 
       <div style={noteStyle}>

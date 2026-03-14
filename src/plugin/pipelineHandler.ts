@@ -24,6 +24,9 @@ import {
   PAGE_NUMBER_FONT_SIZE,
   PAGE_NUMBER_MARGIN,
   KEY_COLOR_A,
+  META_AREA_X,
+  META_AREA_Y,
+  META_SECTION_GAP,
 } from '../shared/constants';
 import { Phase, PHASE_INFO, Step, STEP_INFO } from '../shared/pipeline';
 
@@ -893,6 +896,527 @@ async function generateFinalOutput(
   return result;
 }
 
+// ---- Inner Pages Creation (Step 19) ----
+
+const INNER_PAGE_TEMPLATES: Record<string, { title: string; hasImage: boolean }> = {
+  'intro': { title: 'Pronounce Korean', hasImage: false },
+  'index': { title: 'Index', hasImage: false },
+  'qr-title': { title: 'QR Resources', hasImage: false },
+  'qr-guide': { title: 'QR Resources Guide', hasImage: true },
+  'characters': { title: 'Characters', hasImage: true },
+  'part1-title': { title: 'Part 1 - Korean', hasImage: false },
+  'part2-title': { title: 'Part 2 - Korean + English', hasImage: false },
+  'part3-title': { title: 'Part 3 - Korean + Key Expressions', hasImage: false },
+  'blank-back': { title: '', hasImage: false },
+  'class-info': { title: '1:1 Class', hasImage: false },
+};
+
+/**
+ * Create inner page frames for each selected page type.
+ * Positions all inner pages below the last part section with a separator gap.
+ */
+async function createInnerPages(
+  pageTypes: string[],
+  keyColorA: string,
+  keyColorB: string,
+  bookTitle?: string,
+  bookTitleEn?: string
+): Promise<number> {
+  await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+  await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+  const colorA = hexToFigmaColor(keyColorA || KEY_COLOR_A);
+  const colorB = hexToFigmaColor(keyColorB || '#FFF69B');
+  const WHITE: RGB = { r: 1, g: 1, b: 1 };
+  const DARK_TEXT: RGB = { r: 0.13, g: 0.13, b: 0.13 };
+  const GRAY_TEXT: RGB = { r: 0.5, g: 0.5, b: 0.5 };
+  const LIGHT_GRAY: RGB = { r: 0.85, g: 0.85, b: 0.85 };
+
+  // Remove existing inner page frames
+  const existingInner = figma.currentPage.findAll(
+    (n) => n.type === 'FRAME' && n.name.startsWith('PK-Inner-')
+  ) as FrameNode[];
+  for (const f of existingInner) f.remove();
+
+  // Find the bottom Y position of the last part to position inner pages below
+  const part3Bottom = getPartBottomY('PK-Part3-Page');
+  const part2Bottom = getPartBottomY('PK-Part2-Page');
+  const part1Bottom = getPartBottomY('PK-Part1-Page');
+  const referenceBottom = Math.max(part3Bottom, part2Bottom, part1Bottom);
+  const separatorGap = PART_SEPARATOR_ROWS * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
+  const innerStartY = referenceBottom > 0 ? referenceBottom + separatorGap : 0;
+
+  const displayBookTitle = bookTitle || '';
+  const displayBookTitleEn = bookTitleEn || 'Pronounce Korean';
+
+  let createdCount = 0;
+
+  for (let i = 0; i < pageTypes.length; i++) {
+    const pageType = pageTypes[i];
+    const template = INNER_PAGE_TEMPLATES[pageType];
+    if (!template) continue;
+
+    // Calculate position (2 per row, like story pages)
+    const col = i % PAGES_PER_ROW;
+    const row = Math.floor(i / PAGES_PER_ROW);
+    const x = col * (STORY_PAGE_WIDTH + PAGE_GAP_H);
+    const y = innerStartY + row * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
+
+    // Create the frame
+    const frame = figma.createFrame();
+    frame.name = `PK-Inner-${pageType}`;
+    frame.resize(STORY_PAGE_WIDTH, STORY_PAGE_HEIGHT);
+    frame.x = x;
+    frame.y = y;
+    frame.setPluginData(PLUGIN_DATA_KEYS.nodeType, 'story-page');
+
+    // Build content based on page type
+    switch (pageType) {
+      case 'part1-title':
+      case 'part2-title':
+      case 'part3-title': {
+        // Title pages: Key color A background, large centered title, book title at top
+        frame.fills = [{ type: 'SOLID', color: colorA }];
+
+        // Book title at top
+        if (displayBookTitleEn) {
+          const topTitle = figma.createText();
+          topTitle.fontName = { family: 'Inter', style: 'Regular' };
+          topTitle.characters = displayBookTitleEn;
+          topTitle.fontSize = 120;
+          topTitle.fills = [{ type: 'SOLID', color: WHITE }];
+          topTitle.textAlignHorizontal = 'CENTER';
+          topTitle.resize(STORY_PAGE_WIDTH - 400, 200);
+          topTitle.x = 200;
+          topTitle.y = 400;
+          frame.appendChild(topTitle);
+        }
+
+        if (displayBookTitle) {
+          const topTitleKo = figma.createText();
+          topTitleKo.fontName = { family: 'Inter', style: 'Regular' };
+          topTitleKo.characters = displayBookTitle;
+          topTitleKo.fontSize = 80;
+          topTitleKo.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+          topTitleKo.textAlignHorizontal = 'CENTER';
+          topTitleKo.resize(STORY_PAGE_WIDTH - 400, 150);
+          topTitleKo.x = 200;
+          topTitleKo.y = 620;
+          frame.appendChild(topTitleKo);
+        }
+
+        // Large centered part title
+        const partTitle = figma.createText();
+        partTitle.fontName = { family: 'Inter', style: 'Bold' };
+        partTitle.characters = template.title;
+        partTitle.fontSize = 200;
+        partTitle.fills = [{ type: 'SOLID', color: WHITE }];
+        partTitle.textAlignHorizontal = 'CENTER';
+        partTitle.resize(STORY_PAGE_WIDTH - 200, 400);
+        partTitle.textAutoResize = 'HEIGHT';
+        partTitle.x = 100;
+        partTitle.y = STORY_PAGE_HEIGHT / 2 - 200;
+        frame.appendChild(partTitle);
+
+        // Decorative line
+        const line = figma.createRectangle();
+        line.resize(800, 8);
+        line.x = (STORY_PAGE_WIDTH - 800) / 2;
+        line.y = STORY_PAGE_HEIGHT / 2 + 250;
+        line.fills = [{ type: 'SOLID', color: WHITE }];
+        line.opacity = 0.6;
+        frame.appendChild(line);
+        break;
+      }
+
+      case 'index': {
+        // Index page: White background, "Index / 목차" title, placeholder lines
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+
+        const indexTitle = figma.createText();
+        indexTitle.fontName = { family: 'Inter', style: 'Bold' };
+        indexTitle.characters = 'Index / 목차';
+        indexTitle.fontSize = 160;
+        indexTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        indexTitle.textAlignHorizontal = 'CENTER';
+        indexTitle.resize(STORY_PAGE_WIDTH - 400, 250);
+        indexTitle.x = 200;
+        indexTitle.y = 300;
+        frame.appendChild(indexTitle);
+
+        // Divider line below title
+        const divider = figma.createRectangle();
+        divider.resize(STORY_PAGE_WIDTH - 600, 4);
+        divider.x = 300;
+        divider.y = 620;
+        divider.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        frame.appendChild(divider);
+
+        // Placeholder lines for page entries
+        const lineStartY = 750;
+        const lineSpacing = 140;
+        const placeholderEntries = [
+          'Part 1 — Korean ........................ 00',
+          'Part 2 — Korean + English .............. 00',
+          'Part 3 — Korean + Key Expressions ...... 00',
+          'QR Resources ........................... 00',
+          'Characters ............................. 00',
+        ];
+
+        for (let lineIdx = 0; lineIdx < placeholderEntries.length; lineIdx++) {
+          const entryText = figma.createText();
+          entryText.fontName = { family: 'Inter', style: 'Regular' };
+          entryText.characters = placeholderEntries[lineIdx];
+          entryText.fontSize = 80;
+          entryText.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+          entryText.textAlignHorizontal = 'LEFT';
+          entryText.resize(STORY_PAGE_WIDTH - 600, 120);
+          entryText.x = 300;
+          entryText.y = lineStartY + lineIdx * lineSpacing;
+          frame.appendChild(entryText);
+        }
+        break;
+      }
+
+      case 'intro': {
+        // Intro page: Key color B background, title, description placeholder
+        frame.fills = [{ type: 'SOLID', color: colorB }];
+
+        const introTitle = figma.createText();
+        introTitle.fontName = { family: 'Inter', style: 'Bold' };
+        introTitle.characters = 'Pronounce Korean';
+        introTitle.fontSize = 180;
+        introTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        introTitle.textAlignHorizontal = 'CENTER';
+        introTitle.resize(STORY_PAGE_WIDTH - 300, 300);
+        introTitle.x = 150;
+        introTitle.y = 600;
+        frame.appendChild(introTitle);
+
+        // Subtitle
+        const subtitle = figma.createText();
+        subtitle.fontName = { family: 'Inter', style: 'Regular' };
+        subtitle.characters = '한국어 발음 학습 시리즈';
+        subtitle.fontSize = 100;
+        subtitle.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        subtitle.textAlignHorizontal = 'CENTER';
+        subtitle.resize(STORY_PAGE_WIDTH - 300, 160);
+        subtitle.x = 150;
+        subtitle.y = 950;
+        frame.appendChild(subtitle);
+
+        // Description placeholder
+        const descPlaceholder = figma.createText();
+        descPlaceholder.fontName = { family: 'Inter', style: 'Regular' };
+        descPlaceholder.characters = '[ 소개 내용을 여기에 작성하세요 ]\n\nThis book will help you learn Korean pronunciation\nthrough dialogues and key expressions.\n\n이 책은 대화와 핵심 표현을 통해\n한국어 발음을 배울 수 있도록 도와줍니다.';
+        descPlaceholder.fontSize = 72;
+        descPlaceholder.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        descPlaceholder.textAlignHorizontal = 'CENTER';
+        descPlaceholder.resize(STORY_PAGE_WIDTH - 600, 1200);
+        descPlaceholder.textAutoResize = 'HEIGHT';
+        descPlaceholder.x = 300;
+        descPlaceholder.y = 1400;
+        frame.appendChild(descPlaceholder);
+        break;
+      }
+
+      case 'qr-title': {
+        // QR Title page: White background, title, QR placeholder
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+
+        const qrTitle = figma.createText();
+        qrTitle.fontName = { family: 'Inter', style: 'Bold' };
+        qrTitle.characters = 'QR Resources';
+        qrTitle.fontSize = 160;
+        qrTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        qrTitle.textAlignHorizontal = 'CENTER';
+        qrTitle.resize(STORY_PAGE_WIDTH - 400, 250);
+        qrTitle.x = 200;
+        qrTitle.y = 400;
+        frame.appendChild(qrTitle);
+
+        const qrSubtitle = figma.createText();
+        qrSubtitle.fontName = { family: 'Inter', style: 'Regular' };
+        qrSubtitle.characters = 'QR 코드로 학습 자료에 접근하세요';
+        qrSubtitle.fontSize = 80;
+        qrSubtitle.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        qrSubtitle.textAlignHorizontal = 'CENTER';
+        qrSubtitle.resize(STORY_PAGE_WIDTH - 400, 130);
+        qrSubtitle.x = 200;
+        qrSubtitle.y = 700;
+        frame.appendChild(qrSubtitle);
+
+        // QR placeholder square
+        const qrSize = 800;
+        const qrPlaceholder = figma.createRectangle();
+        qrPlaceholder.resize(qrSize, qrSize);
+        qrPlaceholder.x = (STORY_PAGE_WIDTH - qrSize) / 2;
+        qrPlaceholder.y = 1200;
+        qrPlaceholder.fills = [{ type: 'SOLID', color: LIGHT_GRAY }];
+        qrPlaceholder.cornerRadius = 40;
+        qrPlaceholder.strokes = [{ type: 'SOLID', color: GRAY_TEXT }];
+        qrPlaceholder.strokeWeight = 4;
+        frame.appendChild(qrPlaceholder);
+
+        // QR label inside placeholder
+        const qrLabel = figma.createText();
+        qrLabel.fontName = { family: 'Inter', style: 'Regular' };
+        qrLabel.characters = '[ QR Code ]';
+        qrLabel.fontSize = 80;
+        qrLabel.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        qrLabel.textAlignHorizontal = 'CENTER';
+        qrLabel.resize(qrSize, 120);
+        qrLabel.x = (STORY_PAGE_WIDTH - qrSize) / 2;
+        qrLabel.y = 1200 + (qrSize - 120) / 2;
+        frame.appendChild(qrLabel);
+        break;
+      }
+
+      case 'qr-guide': {
+        // QR Guide page: White background, instructions, QR placeholder
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+
+        const guideTitle = figma.createText();
+        guideTitle.fontName = { family: 'Inter', style: 'Bold' };
+        guideTitle.characters = 'QR Resources Guide';
+        guideTitle.fontSize = 140;
+        guideTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        guideTitle.textAlignHorizontal = 'CENTER';
+        guideTitle.resize(STORY_PAGE_WIDTH - 400, 220);
+        guideTitle.x = 200;
+        guideTitle.y = 300;
+        frame.appendChild(guideTitle);
+
+        // Guide steps placeholder
+        const guideSteps = figma.createText();
+        guideSteps.fontName = { family: 'Inter', style: 'Regular' };
+        guideSteps.characters = '1. 스마트폰 카메라로 QR 코드를 스캔하세요\n\n2. 링크를 클릭하여 학습 자료에 접근하세요\n\n3. 음성 파일과 추가 학습 자료를 확인하세요';
+        guideSteps.fontSize = 72;
+        guideSteps.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        guideSteps.textAlignHorizontal = 'LEFT';
+        guideSteps.resize(STORY_PAGE_WIDTH - 600, 1000);
+        guideSteps.textAutoResize = 'HEIGHT';
+        guideSteps.x = 300;
+        guideSteps.y = 700;
+        frame.appendChild(guideSteps);
+
+        // Image placeholder for guide illustration
+        const imgPlaceholder = figma.createRectangle();
+        imgPlaceholder.resize(STORY_PAGE_WIDTH - 600, 1200);
+        imgPlaceholder.x = 300;
+        imgPlaceholder.y = 1800;
+        imgPlaceholder.fills = [{ type: 'SOLID', color: LIGHT_GRAY }];
+        imgPlaceholder.cornerRadius = 30;
+        frame.appendChild(imgPlaceholder);
+
+        const imgLabel = figma.createText();
+        imgLabel.fontName = { family: 'Inter', style: 'Regular' };
+        imgLabel.characters = '[ 안내 이미지 ]';
+        imgLabel.fontSize = 80;
+        imgLabel.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        imgLabel.textAlignHorizontal = 'CENTER';
+        imgLabel.resize(STORY_PAGE_WIDTH - 600, 120);
+        imgLabel.x = 300;
+        imgLabel.y = 1800 + (1200 - 120) / 2;
+        frame.appendChild(imgLabel);
+        break;
+      }
+
+      case 'characters': {
+        // Characters page: White background, title, placeholder grid
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+
+        const charTitle = figma.createText();
+        charTitle.fontName = { family: 'Inter', style: 'Bold' };
+        charTitle.characters = 'Characters';
+        charTitle.fontSize = 160;
+        charTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+        charTitle.textAlignHorizontal = 'CENTER';
+        charTitle.resize(STORY_PAGE_WIDTH - 400, 250);
+        charTitle.x = 200;
+        charTitle.y = 300;
+        frame.appendChild(charTitle);
+
+        const charSubtitle = figma.createText();
+        charSubtitle.fontName = { family: 'Inter', style: 'Regular' };
+        charSubtitle.characters = '등장인물 소개';
+        charSubtitle.fontSize = 80;
+        charSubtitle.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        charSubtitle.textAlignHorizontal = 'CENTER';
+        charSubtitle.resize(STORY_PAGE_WIDTH - 400, 130);
+        charSubtitle.x = 200;
+        charSubtitle.y = 580;
+        frame.appendChild(charSubtitle);
+
+        // Character placeholder grid (2x3 grid)
+        const charGridCols = 2;
+        const charGridRows = 3;
+        const charCardW = 1200;
+        const charCardH = 800;
+        const charGap = 100;
+        const charGridStartX = (STORY_PAGE_WIDTH - (charGridCols * charCardW + (charGridCols - 1) * charGap)) / 2;
+        const charGridStartY = 850;
+
+        for (let r = 0; r < charGridRows; r++) {
+          for (let c = 0; c < charGridCols; c++) {
+            const charCard = figma.createFrame();
+            charCard.name = `character-slot-${r * charGridCols + c}`;
+            charCard.resize(charCardW, charCardH);
+            charCard.x = charGridStartX + c * (charCardW + charGap);
+            charCard.y = charGridStartY + r * (charCardH + charGap);
+            charCard.fills = [{ type: 'SOLID', color: LIGHT_GRAY }];
+            charCard.cornerRadius = 30;
+
+            // Character image placeholder (circle)
+            const circleSize = 300;
+            const circle = figma.createEllipse();
+            circle.resize(circleSize, circleSize);
+            circle.x = (charCardW - circleSize) / 2;
+            circle.y = 80;
+            circle.fills = [{ type: 'SOLID', color: { r: 0.92, g: 0.92, b: 0.92 } }];
+            charCard.appendChild(circle);
+
+            // Name placeholder
+            const charName = figma.createText();
+            charName.fontName = { family: 'Inter', style: 'Bold' };
+            charName.characters = `캐릭터 ${r * charGridCols + c + 1}`;
+            charName.fontSize = 60;
+            charName.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+            charName.textAlignHorizontal = 'CENTER';
+            charName.resize(charCardW - 100, 90);
+            charName.x = 50;
+            charName.y = 430;
+            charCard.appendChild(charName);
+
+            // Description placeholder
+            const charDesc = figma.createText();
+            charDesc.fontName = { family: 'Inter', style: 'Regular' };
+            charDesc.characters = '[ 설명 ]';
+            charDesc.fontSize = 44;
+            charDesc.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+            charDesc.textAlignHorizontal = 'CENTER';
+            charDesc.resize(charCardW - 100, 70);
+            charDesc.x = 50;
+            charDesc.y = 550;
+            charCard.appendChild(charDesc);
+
+            frame.appendChild(charCard);
+          }
+        }
+        break;
+      }
+
+      case 'blank-back': {
+        // Blank page: Plain white, empty
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+        // Intentionally left empty
+        break;
+      }
+
+      case 'class-info': {
+        // Class info: Key color A background, centered text
+        frame.fills = [{ type: 'SOLID', color: colorA }];
+
+        const classTitle = figma.createText();
+        classTitle.fontName = { family: 'Inter', style: 'Bold' };
+        classTitle.characters = '1:1 한국어 대화 수업';
+        classTitle.fontSize = 180;
+        classTitle.fills = [{ type: 'SOLID', color: WHITE }];
+        classTitle.textAlignHorizontal = 'CENTER';
+        classTitle.resize(STORY_PAGE_WIDTH - 300, 280);
+        classTitle.x = 150;
+        classTitle.y = 800;
+        frame.appendChild(classTitle);
+
+        const classSubtitle = figma.createText();
+        classSubtitle.fontName = { family: 'Inter', style: 'Regular' };
+        classSubtitle.characters = '1:1 Korean Conversation Class';
+        classSubtitle.fontSize = 100;
+        classSubtitle.fills = [{ type: 'SOLID', color: WHITE }];
+        classSubtitle.textAlignHorizontal = 'CENTER';
+        classSubtitle.resize(STORY_PAGE_WIDTH - 300, 160);
+        classSubtitle.x = 150;
+        classSubtitle.y = 1150;
+        frame.appendChild(classSubtitle);
+
+        // Decorative line
+        const classLine = figma.createRectangle();
+        classLine.resize(600, 6);
+        classLine.x = (STORY_PAGE_WIDTH - 600) / 2;
+        classLine.y = 1450;
+        classLine.fills = [{ type: 'SOLID', color: WHITE }];
+        classLine.opacity = 0.7;
+        frame.appendChild(classLine);
+
+        // Description
+        const classDesc = figma.createText();
+        classDesc.fontName = { family: 'Inter', style: 'Regular' };
+        classDesc.characters = '[ 수업 안내 내용을 여기에 작성하세요 ]\n\nQR 코드를 스캔하여 수업을 신청하세요';
+        classDesc.fontSize = 72;
+        classDesc.fills = [{ type: 'SOLID', color: WHITE }];
+        classDesc.textAlignHorizontal = 'CENTER';
+        classDesc.resize(STORY_PAGE_WIDTH - 600, 600);
+        classDesc.textAutoResize = 'HEIGHT';
+        classDesc.x = 300;
+        classDesc.y = 1600;
+        frame.appendChild(classDesc);
+
+        // QR placeholder for class registration
+        const classQrSize = 600;
+        const classQr = figma.createRectangle();
+        classQr.resize(classQrSize, classQrSize);
+        classQr.x = (STORY_PAGE_WIDTH - classQrSize) / 2;
+        classQr.y = 2300;
+        classQr.fills = [{ type: 'SOLID', color: WHITE }];
+        classQr.cornerRadius = 30;
+        frame.appendChild(classQr);
+
+        const classQrLabel = figma.createText();
+        classQrLabel.fontName = { family: 'Inter', style: 'Regular' };
+        classQrLabel.characters = '[ QR Code ]';
+        classQrLabel.fontSize = 60;
+        classQrLabel.fills = [{ type: 'SOLID', color: GRAY_TEXT }];
+        classQrLabel.textAlignHorizontal = 'CENTER';
+        classQrLabel.resize(classQrSize, 90);
+        classQrLabel.x = (STORY_PAGE_WIDTH - classQrSize) / 2;
+        classQrLabel.y = 2300 + (classQrSize - 90) / 2;
+        frame.appendChild(classQrLabel);
+        break;
+      }
+
+      default: {
+        // Fallback: white page with title
+        frame.fills = [{ type: 'SOLID', color: WHITE }];
+        if (template.title) {
+          const fallbackTitle = figma.createText();
+          fallbackTitle.fontName = { family: 'Inter', style: 'Bold' };
+          fallbackTitle.characters = template.title;
+          fallbackTitle.fontSize = 160;
+          fallbackTitle.fills = [{ type: 'SOLID', color: DARK_TEXT }];
+          fallbackTitle.textAlignHorizontal = 'CENTER';
+          fallbackTitle.resize(STORY_PAGE_WIDTH - 400, 250);
+          fallbackTitle.x = 200;
+          fallbackTitle.y = STORY_PAGE_HEIGHT / 2 - 125;
+          frame.appendChild(fallbackTitle);
+        }
+        break;
+      }
+    }
+
+    createdCount++;
+  }
+
+  // Zoom to show all inner pages
+  const innerFrames = figma.currentPage.findAll(
+    (n) => n.type === 'FRAME' && n.name.startsWith('PK-Inner-')
+  ) as SceneNode[];
+  if (innerFrames.length > 0) {
+    figma.viewport.scrollAndZoomIntoView(innerFrames);
+  }
+
+  return createdCount;
+}
+
 // ---- Main Pipeline Message Handler ----
 
 /**
@@ -1209,16 +1733,300 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
-    case 'STORE_SCENE_IMAGE':
+    case 'STORE_SCENE_IMAGE': {
+      try {
+        // Find or create scene image storage frame
+        const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
+        let storageFrame = figma.currentPage.findOne(
+          (n) => n.name === storageName && n.type === 'FRAME'
+        ) as FrameNode | null;
+
+        if (!storageFrame) {
+          storageFrame = figma.createFrame();
+          storageFrame.name = storageName;
+          storageFrame.resize(1000, 250);
+          // Position in meta area (left side of canvas)
+          storageFrame.x = META_AREA_X;
+          storageFrame.y = META_AREA_Y + (msg.pageIndex + 3) * META_SECTION_GAP; // offset below other meta sections
+          storageFrame.fills = [{ type: 'SOLID', color: { r: 0.97, g: 0.97, b: 0.97 } }];
+          storageFrame.setPluginData(PLUGIN_DATA_KEYS.nodeType, 'meta-page-images');
+          storageFrame.setPluginData(PLUGIN_DATA_KEYS.pageIndex, String(msg.pageIndex));
+        }
+
+        // Create image from bytes
+        const imageBytes = new Uint8Array(msg.imageBytes);
+        const image = figma.createImage(imageBytes);
+        const imageHash = image.hash;
+
+        // Create rectangle to hold the image
+        const imgSize = 200;
+        const rect = figma.createRectangle();
+        rect.name = `scene-img-${msg.pageIndex}-${msg.variant}`;
+        rect.resize(imgSize, imgSize);
+        rect.x = msg.variant * (imgSize + 20) + 20;
+        rect.y = 30;
+        rect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
+        rect.setPluginData('pageIndex', String(msg.pageIndex));
+        rect.setPluginData('variant', String(msg.variant));
+        rect.setPluginData('backgroundType', msg.backgroundType);
+        rect.setPluginData('imageHash', imageHash);
+
+        // Remove existing image with same variant
+        const existing = storageFrame.findOne(
+          (n) => n.name === `scene-img-${msg.pageIndex}-${msg.variant}`
+        );
+        if (existing) existing.remove();
+
+        storageFrame.appendChild(rect);
+
+        // Add label text
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        const label = figma.createText();
+        label.fontName = { family: 'Inter', style: 'Regular' };
+        label.characters = `V${msg.variant + 1} (${msg.backgroundType === 'white' ? '흰배경' : '풀배경'})`;
+        label.fontSize = 14;
+        label.x = rect.x;
+        label.y = rect.y - 18;
+        label.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+        label.name = `label-${msg.variant}`;
+        // Remove existing label
+        const existingLabel = storageFrame.findOne(n => n.name === `label-${msg.variant}`);
+        if (existingLabel) existingLabel.remove();
+        storageFrame.appendChild(label);
+
+        figma.ui.postMessage({
+          type: 'SCENE_IMAGE_STORED',
+          pageIndex: msg.pageIndex,
+          variant: msg.variant,
+          imageHash,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: `Failed to store scene image for page ${msg.pageIndex + 1}`,
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
     case 'SELECT_SCENE_IMAGE': {
-      // Image storage/selection - will be fully implemented with Gemini Image API
-      console.log(`Pipeline message received but not yet implemented: ${msg.type}`);
+      try {
+        // Find the storage frame for this page
+        const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
+        const storageFrame = figma.currentPage.findOne(
+          (n) => n.name === storageName && n.type === 'FRAME'
+        ) as FrameNode | null;
+
+        if (!storageFrame) {
+          throw new Error(`No images stored for page ${msg.pageIndex + 1}`);
+        }
+
+        // Find the selected variant's image hash
+        const variantRect = storageFrame.findOne(
+          (n) => n.name === `scene-img-${msg.pageIndex}-${msg.variant}` && n.type === 'RECTANGLE'
+        ) as RectangleNode | null;
+
+        if (!variantRect) {
+          throw new Error(`Variant ${msg.variant} not found for page ${msg.pageIndex + 1}`);
+        }
+
+        const imageHash = variantRect.getPluginData('imageHash');
+        if (!imageHash) throw new Error('Image hash not found');
+
+        // Find the Part 1 page frame
+        const pageName = FRAME_NAMES.part1Page(msg.pageIndex);
+        const pageFrame = figma.currentPage.findOne(
+          (n) => n.name === pageName && n.type === 'FRAME'
+        ) as FrameNode | null;
+
+        if (!pageFrame) {
+          throw new Error(`Page frame not found: ${pageName}`);
+        }
+
+        // Remove existing scene image from page
+        const existingSceneImg = pageFrame.findOne(
+          (n) => n.name === 'scene-image' && n.type === 'RECTANGLE'
+        );
+        if (existingSceneImg) existingSceneImg.remove();
+
+        // Create full-page background image
+        const bgRect = figma.createRectangle();
+        bgRect.name = 'scene-image';
+        bgRect.resize(STORY_PAGE_WIDTH, STORY_PAGE_HEIGHT);
+        bgRect.x = 0;
+        bgRect.y = 0;
+        bgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
+
+        // Insert at the bottom of the frame (behind text)
+        if (pageFrame.children.length > 0) {
+          pageFrame.insertChild(0, bgRect);
+        } else {
+          pageFrame.appendChild(bgRect);
+        }
+
+        // Store selection in page frame's pluginData
+        pageFrame.setPluginData('selectedVariant', String(msg.variant));
+        pageFrame.setPluginData('sceneImageHash', imageHash);
+
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: `Failed to select scene image`,
+          detail: err?.message ?? String(err),
+        });
+      }
       return true;
     }
 
     case 'APPLY_KEY_EXPRESSIONS': {
-      // Key expressions application - will be fully implemented
-      console.log(`Pipeline message received but not yet implemented: ${msg.type}`);
+      try {
+        // Process each page's expressions
+        for (const pageData of msg.expressions) {
+          const { pageIndex, cards } = pageData;
+
+          // Find the Part 3 frame for this page
+          const frameName = FRAME_NAMES.part3Page(pageIndex);
+          const part3Frame = figma.currentPage.findOne(
+            (n) => n.name === frameName && n.type === 'FRAME'
+          ) as FrameNode | null;
+
+          if (!part3Frame) {
+            console.log(`Part 3 frame not found for page ${pageIndex}: ${frameName}`);
+            continue;
+          }
+
+          // Find or create key expression sub-frame within the Part 3 page
+          let keyExprFrame = part3Frame.findOne(
+            (n) => n.name === 'key-expr-area' && n.type === 'FRAME'
+          ) as FrameNode | null;
+
+          if (!keyExprFrame) {
+            keyExprFrame = figma.createFrame();
+            keyExprFrame.name = 'key-expr-area';
+            // Position in the bottom 40% of the page
+            const keyExprY = Math.round(STORY_PAGE_HEIGHT * 0.6);
+            keyExprFrame.resize(STORY_PAGE_WIDTH, STORY_PAGE_HEIGHT - keyExprY);
+            keyExprFrame.x = 0;
+            keyExprFrame.y = keyExprY;
+            keyExprFrame.fills = []; // Transparent
+            keyExprFrame.clipsContent = true;
+            part3Frame.appendChild(keyExprFrame);
+          } else {
+            // Clear existing key expression content
+            while (keyExprFrame.children.length > 0) {
+              keyExprFrame.children[0].remove();
+            }
+          }
+
+          // Place expression cards in a simple grid layout within the key expr area
+          // Each card is roughly 1:1 ratio, 4 cards per row
+          const cardSize = Math.floor((keyExprFrame.width - 5 * 40) / 4); // 4 cards with 40px gaps
+          const gap = 40;
+          let fontFamily = DEFAULT_FONT_FAMILY;
+          try {
+            await figma.loadFontAsync({ family: fontFamily, style: 'Regular' });
+            await figma.loadFontAsync({ family: fontFamily, style: 'Bold' });
+          } catch {
+            fontFamily = 'Inter';
+            await figma.loadFontAsync({ family: fontFamily, style: 'Regular' });
+            await figma.loadFontAsync({ family: fontFamily, style: 'Bold' });
+          }
+
+          for (let cardIdx = 0; cardIdx < cards.length; cardIdx++) {
+            const card = cards[cardIdx];
+            const col = cardIdx % 4;
+            const row = Math.floor(cardIdx / 4);
+
+            const cardFrame = figma.createFrame();
+            cardFrame.name = `key-expr-card-${cardIdx}`;
+            cardFrame.resize(cardSize, cardSize);
+            cardFrame.x = gap + col * (cardSize + gap);
+            cardFrame.y = gap + row * (cardSize + gap);
+            cardFrame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+            cardFrame.cornerRadius = 24;
+            cardFrame.strokes = [{ type: 'SOLID', color: hexToFigmaColor('#FFB74A') }];
+            cardFrame.strokeWeight = 6;
+
+            // Image area (top 67%)
+            const imgHeight = Math.round(cardSize * 0.67);
+            const imgFrame = figma.createFrame();
+            imgFrame.name = `key-expr-img-${cardIdx}`;
+            imgFrame.resize(cardSize - 40, imgHeight - 20);
+            imgFrame.x = 20;
+            imgFrame.y = 10;
+            imgFrame.fills = [{ type: 'SOLID', color: { r: 0.96, g: 0.96, b: 0.96 } }];
+            imgFrame.cornerRadius = 16;
+            cardFrame.appendChild(imgFrame);
+
+            // Korean text
+            const textY = imgHeight;
+            const koText = figma.createText();
+            koText.fontName = { family: fontFamily, style: 'Bold' };
+            koText.characters = card.lines.join('\n');
+            koText.fontSize = Math.round(cardSize * 0.08);
+            koText.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+            koText.textAlignHorizontal = 'CENTER';
+            koText.resize(cardSize - 40, cardSize * 0.15);
+            koText.textAutoResize = 'HEIGHT';
+            koText.x = 20;
+            koText.y = textY + 5;
+            cardFrame.appendChild(koText);
+
+            // English text
+            if (card.enLines && card.enLines.length > 0) {
+              const enText = figma.createText();
+              enText.fontName = { family: fontFamily, style: 'Regular' };
+              enText.characters = card.enLines.join('\n');
+              enText.fontSize = Math.round(cardSize * 0.06);
+              enText.fills = [{ type: 'SOLID', color: { r: 0.42, g: 0.42, b: 0.42 } }];
+              enText.textAlignHorizontal = 'CENTER';
+              enText.resize(cardSize - 40, cardSize * 0.12);
+              enText.textAutoResize = 'HEIGHT';
+              enText.x = 20;
+              enText.y = koText.y + koText.height + 5;
+              cardFrame.appendChild(enText);
+            }
+
+            keyExprFrame.appendChild(cardFrame);
+          }
+        }
+
+        figma.ui.postMessage({
+          type: 'LAYOUT_CREATED',
+          placements: [],
+          frameId: '',
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to apply key expressions',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'CREATE_INNER_PAGES': {
+      try {
+        const count = await createInnerPages(
+          msg.pages,
+          msg.keyColorA,
+          msg.keyColorB,
+          msg.bookTitle,
+          msg.bookTitleEn
+        );
+        figma.ui.postMessage({
+          type: 'INNER_PAGES_CREATED',
+          pageCount: count,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to create inner pages',
+          detail: err?.message ?? String(err),
+        });
+      }
       return true;
     }
 
