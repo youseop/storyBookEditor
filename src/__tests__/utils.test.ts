@@ -175,6 +175,78 @@ describe('parseTextToPages', () => {
   });
 });
 
+// ===== Card template detection (inline re-implementation for testing) =====
+
+type CardTemplate = 'standard' | 'horizontal' | 'note';
+
+function detectTemplate(lines: string[]): { template: CardTemplate; cleanLines: string[] } {
+  if (lines.length === 0) return { template: 'standard', cleanLines: lines };
+  const firstLine = lines[0];
+  if (firstLine.startsWith('@h ')) {
+    return { template: 'horizontal', cleanLines: [firstLine.slice(3), ...lines.slice(1)] };
+  }
+  if (firstLine.startsWith('@note ')) {
+    return { template: 'note', cleanLines: [firstLine.slice(6), ...lines.slice(1)] };
+  }
+  if (firstLine.trim() === '@h' && lines.length > 1) {
+    return { template: 'horizontal', cleanLines: lines.slice(1) };
+  }
+  if (firstLine.trim() === '@note' && lines.length > 1) {
+    return { template: 'note', cleanLines: lines.slice(1) };
+  }
+  return { template: 'standard', cleanLines: lines };
+}
+
+describe('detectTemplate', () => {
+  it('defaults to standard with no marker', () => {
+    const result = detectTemplate(['고양이', 'Cat']);
+    expect(result.template).toBe('standard');
+    expect(result.cleanLines).toEqual(['고양이', 'Cat']);
+  });
+
+  it('detects @h prefix inline', () => {
+    const result = detectTemplate(['@h 달리다', 'Run']);
+    expect(result.template).toBe('horizontal');
+    expect(result.cleanLines).toEqual(['달리다', 'Run']);
+  });
+
+  it('detects @note prefix inline', () => {
+    const result = detectTemplate(['@note 팁: ~하다를 사용해보세요', 'Tip: Try using ~hada']);
+    expect(result.template).toBe('note');
+    expect(result.cleanLines).toEqual(['팁: ~하다를 사용해보세요', 'Tip: Try using ~hada']);
+  });
+
+  it('detects @h on its own line', () => {
+    const result = detectTemplate(['@h', '뛰다', 'Jump']);
+    expect(result.template).toBe('horizontal');
+    expect(result.cleanLines).toEqual(['뛰다', 'Jump']);
+  });
+
+  it('detects @note on its own line', () => {
+    const result = detectTemplate(['@note', '문법 설명', 'Grammar note']);
+    expect(result.template).toBe('note');
+    expect(result.cleanLines).toEqual(['문법 설명', 'Grammar note']);
+  });
+
+  it('does not detect @h without space after', () => {
+    const result = detectTemplate(['@horizontal 뛰다']);
+    expect(result.template).toBe('standard');
+    expect(result.cleanLines).toEqual(['@horizontal 뛰다']);
+  });
+
+  it('handles empty lines array', () => {
+    const result = detectTemplate([]);
+    expect(result.template).toBe('standard');
+    expect(result.cleanLines).toEqual([]);
+  });
+
+  it('@h alone with no subsequent lines stays standard', () => {
+    const result = detectTemplate(['@h']);
+    expect(result.template).toBe('standard');
+    expect(result.cleanLines).toEqual(['@h']);
+  });
+});
+
 // ===== Pipeline types =====
 
 describe('pipeline types', () => {
