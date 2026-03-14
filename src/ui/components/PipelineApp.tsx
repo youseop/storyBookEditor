@@ -150,13 +150,22 @@ const PipelineApp: React.FC = () => {
     for (const [key, map] of Object.entries(keyExprEnLinesMaps)) {
       serializedEnLinesMaps[Number(key)] = Object.fromEntries(map);
     }
+    // Filter out undefined values that JSON.stringify would silently drop
+    const cleanContentIdMaps: Record<number, import('../../shared/messageTypes').ContentIdMap> = {};
+    for (const [k, v] of Object.entries(keyExprContentIdMaps)) {
+      if (v !== undefined) cleanContentIdMaps[Number(k)] = v;
+    }
+    const cleanFrameIds: Record<number, string> = {};
+    for (const [k, v] of Object.entries(keyExprFrameIds)) {
+      if (v !== undefined) cleanFrameIds[Number(k)] = v;
+    }
     return {
       ...base,
       translations,
       keyExpressions,
-      keyExprContentIdMaps,
+      keyExprContentIdMaps: cleanContentIdMaps,
       keyExprPlacements,
-      keyExprFrameIds,
+      keyExprFrameIds: cleanFrameIds,
       keyExprEnLinesMaps: serializedEnLinesMaps,
     };
   }, [translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements, keyExprFrameIds, keyExprEnLinesMaps]);
@@ -239,16 +248,13 @@ const PipelineApp: React.FC = () => {
     setPipelineState(prev => ({
       ...prev,
       pages: newPages.map((p, i) => {
-        // Preserve existing sceneAnalysis and selectedImageIndex
-        const existing = prev.pages.find(
-          (ep) => ep.pageIndex === i && !ep.isEmpty && !p.isEmpty
-        );
+        // Preserve ALL existing page data (sceneAnalysis, selectedImageIndex, etc.)
+        const existing = prev.pages.find((ep) => ep.pageIndex === i);
         return {
+          ...(existing || {}),  // Spread ALL existing fields first
           pageIndex: i,
           textBlocks: p.textBlocks,
           isEmpty: p.isEmpty,
-          ...(existing?.sceneAnalysis ? { sceneAnalysis: existing.sceneAnalysis } : {}),
-          ...(existing?.selectedImageIndex !== undefined ? { selectedImageIndex: existing.selectedImageIndex } : {}),
         };
       }),
     }));
@@ -272,7 +278,7 @@ const PipelineApp: React.FC = () => {
   const handleColorsChange = useCallback((colorA: string, colorB: string) => {
     setPipelineState(prev => ({
       ...prev,
-      keyColors: { colorA, colorB },
+      keyColors: { ...prev.keyColors, colorA, colorB },
     }));
   }, []);
 

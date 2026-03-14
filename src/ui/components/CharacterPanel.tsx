@@ -70,13 +70,20 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       const parsed = JSON.parse(extractJson(result));
       const charArray = Array.isArray(parsed) ? parsed : parsed.characters || [];
 
-      const newCharacters: Character[] = charArray.map((c: any) => ({
-        id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
-        name: c.name || '',
-        personality: c.personality || '',
-        appearance: c.appearance || '',
-        confirmed: false,
-      }));
+      const newCharacters: Character[] = charArray.map((c: any) => {
+        // Preserve existing character data (referenceImageBase64, confirmed) if name matches
+        const existing = localCharacters.find(
+          (ec) => ec.name.toLowerCase() === (c.name || '').toLowerCase()
+        );
+        return {
+          id: existing?.id || (Date.now().toString() + Math.random().toString(36).slice(2, 8)),
+          name: c.name || '',
+          personality: c.personality || '',
+          appearance: c.appearance || '',
+          referenceImageBase64: existing?.referenceImageBase64,
+          confirmed: existing?.confirmed || false,
+        };
+      });
 
       setLocalCharacters(newCharacters);
     } catch (err: any) {
