@@ -389,12 +389,14 @@ export interface StoreSceneImageMessage {
   imageBytes: number[];
   variant: number;         // 0-3 (4 variants per scene)
   backgroundType: 'white' | 'full';
+  imageId: string;
 }
 
 export interface SelectSceneImageMessage {
   type: 'SELECT_SCENE_IMAGE';
   pageIndex: number;
   variant: number;
+  imageId?: string;
 }
 
 export interface PlaceDialogueMessage {
@@ -549,6 +551,7 @@ export interface SceneImageStoredMessage {
   pageIndex: number;
   variant: number;
   imageHash: string;
+  imageId?: string;
 }
 
 export interface SnapshotCreatedMessage {
@@ -604,6 +607,16 @@ export interface BulkTranslationsSavedMessage {
   success: boolean;
 }
 
+export interface SaveImagePlacementMessage {
+  type: 'SAVE_IMAGE_PLACEMENT';
+  pageIndices: number[];
+}
+
+export interface ImagePlacementSavedMessage {
+  type: 'IMAGE_PLACEMENT_SAVED';
+  success: boolean;
+}
+
 // Union types
 export type UIToSandboxMessage =
   | GenerateLayoutMessage
@@ -654,7 +667,8 @@ export type UIToSandboxMessage =
   | LoadGalleryMessage
   | DetectStepStatusMessage
   | RestoreSnapshotMessage
-  | LoadPageImagesMessage;
+  | LoadPageImagesMessage
+  | SaveImagePlacementMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -690,4 +704,5 @@ export type SandboxToUIMessage =
   | GalleryLoadedMessage
   | StepStatusDetectedMessage
   | SnapshotRestoredMessage
-  | PageImagesLoadedMessage;
+  | PageImagesLoadedMessage
+  | ImagePlacementSavedMessage;

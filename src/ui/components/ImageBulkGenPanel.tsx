@@ -83,7 +83,6 @@ interface ImageBulkGenPanelProps {
 interface PageImageState {
   images: GeneratedImage[];
   selectedImageId: string | null;
-  customPrompt: string;
   variantMap: Record<string, number>; // imageId → Figma variant number
 }
 
@@ -104,7 +103,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       init[p.pageIndex] = {
         images: [],
         selectedImageId: null,
-        customPrompt: '',
         variantMap: {},
       };
     });
@@ -112,6 +110,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
   });
 
   const [generating, setGenerating] = useState(false);
+  const [regeneratingPages, setRegeneratingPages] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [hoverPreview, setHoverPreview] = useState<{ base64: string; x: number; y: number } | null>(null);
@@ -170,7 +169,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           next[pageData.pageIndex] = {
             images: [...existing, ...newImages],
             selectedImageId: selectedId,
-            customPrompt: next[pageData.pageIndex]?.customPrompt || '',
             variantMap: { ...prevVariantMap, ...loadedVariantMap },
           };
         }
@@ -227,7 +225,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               const prevState = prev[page.pageIndex] || {
                 images: [],
                 selectedImageId: null,
-                customPrompt: '',
                 variantMap: {},
               };
               return {
@@ -248,6 +245,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               imageBytes: Array.from(bytes),
               variant,
               backgroundType: bgType,
+              imageId: img.id,
             });
 
             // Also save to gallery
@@ -278,6 +276,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             type: 'SELECT_SCENE_IMAGE',
             pageIndex: page.pageIndex,
             variant: 0,
+            imageId: firstId,
           });
           onImageSelect(page.pageIndex, 0);
           setImageStates((prev) => ({
@@ -392,7 +391,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         postToPlugin({
           type: 'SELECT_SCENE_IMAGE',
           pageIndex,
-          variant,
+          variant: variant ?? 0,
+          imageId,
         });
         onImageSelect(pageIndex, variant);
 
@@ -408,16 +408,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     [onImageSelect],
   );
 
-  const handleCustomPromptChange = useCallback((pageIndex: number, prompt: string) => {
-    setImageStates((prev) => ({
-      ...prev,
-      [pageIndex]: {
-        ...prev[pageIndex],
-        customPrompt: prompt,
-      },
-    }));
-  }, []);
-
   const handleRegenerate = useCallback(
     async (pageIndex: number) => {
       if (!apiKey) return;
@@ -427,15 +417,14 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       const page = nonEmptyPages.find((p) => p.pageIndex === pageIndex);
       if (!page) return;
 
-      setGenerating(true);
-      setProgress({ current: 0, total: 4 });
+      setRegeneratingPages(prev => new Set(prev).add(pageIndex));
       setError(null);
 
       let completedCount = 0;
       let firstImageId: string | null = null;
 
-      for (const bgType of ['white', 'full'] as const) {
-        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, bgType, styleDescription);
+      await Promise.all((['white', 'full'] as const).map(async (bgType) => {
+        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
         try {
           const images = await generateSceneImages(
             apiKey,
@@ -471,6 +460,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               imageBytes: Array.from(bytes),
               variant,
               backgroundType: bgType,
+              imageId: img.id,
             });
 
             // Also save to gallery
@@ -490,8 +480,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         }
 
         completedCount += 2;
-        setProgress({ current: completedCount, total: 4 });
-      }
+      }));
 
       // Auto-select first regenerated image
       if (firstImageId) {
@@ -500,6 +489,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           type: 'SELECT_SCENE_IMAGE',
           pageIndex,
           variant: 0,
+          imageId: autoId,
         });
         onImageSelect(pageIndex, 0);
         setImageStates((prev) => ({
@@ -511,7 +501,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         }));
       }
 
-      setGenerating(false);
+      setRegeneratingPages(prev => { const next = new Set(prev); next.delete(pageIndex); return next; });
     },
     [apiKey, imageStates, nonEmptyPages, characters, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
   );
@@ -612,21 +602,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     background: '#FFF3F3',
     borderRadius: 4,
     marginBottom: 4,
-  };
-
-  const regenRowStyle: React.CSSProperties = {
-    display: 'flex',
-    gap: 6,
-    alignItems: 'center',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    flex: 1,
-    padding: '4px 6px',
-    border: '1px solid #E5E5E5',
-    borderRadius: 4,
-    fontSize: 11,
-    outline: 'none',
   };
 
   const noteStyle: React.CSSProperties = {
@@ -861,25 +836,17 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                 </div>
               )}
 
-              {/* Regenerate with custom prompt */}
-              <div style={regenRowStyle}>
-                <input
-                  type="text"
-                  style={inputStyle}
-                  placeholder="커스텀 프롬프트..."
-                  value={state.customPrompt}
-                  onChange={(e) => handleCustomPromptChange(page.pageIndex, e.target.value)}
-                />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
                 <button
                   type="button"
                   style={{
                     ...btnOutlineStyle,
-                    ...(generating ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+                    ...(regeneratingPages.has(page.pageIndex) ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
                   }}
                   onClick={() => handleRegenerate(page.pageIndex)}
-                  disabled={generating}
+                  disabled={regeneratingPages.has(page.pageIndex)}
                 >
-                  재생성
+                  {regeneratingPages.has(page.pageIndex) ? '생성 중...' : '재생성'}
                 </button>
               </div>
             </div>

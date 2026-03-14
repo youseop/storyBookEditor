@@ -1996,7 +1996,6 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
     case 'STORE_SCENE_IMAGE': {
       try {
-        // Find or create scene image storage frame
         const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
         let storageFrame = figma.currentPage.findOne(
           (n) => n.name === storageName && n.type === 'FRAME'
@@ -2006,7 +2005,6 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           storageFrame = figma.createFrame();
           storageFrame.name = storageName;
           storageFrame.resize(1000, 250);
-          // Position in meta area (left side of canvas)
           storageFrame.x = META_AREA_X + 2700;
           storageFrame.y = 2500 + msg.pageIndex * 400;
           storageFrame.fills = [{ type: 'SOLID', color: { r: 0.97, g: 0.97, b: 0.97 } }];
@@ -2014,45 +2012,47 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           storageFrame.setPluginData(PLUGIN_DATA_KEYS.pageIndex, String(msg.pageIndex));
         }
 
-        // Create image from bytes
         const imageBytes = new Uint8Array(msg.imageBytes);
         const image = figma.createImage(imageBytes);
         const imageHash = image.hash;
 
-        // Create rectangle to hold the image
         const imgSize = 200;
+        // Count existing image rects to calculate position (DON'T remove existing)
+        const existingImgs = storageFrame.children.filter(
+          (n) => n.type === 'RECTANGLE' && n.name.startsWith('scene-img-')
+        );
+        const slotIndex = existingImgs.length;
+
         const rect = figma.createRectangle();
-        rect.name = `scene-img-${msg.pageIndex}-${msg.variant}`;
+        rect.name = `scene-img-${msg.pageIndex}-${msg.imageId || msg.variant}`;
         rect.resize(imgSize, imgSize);
-        rect.x = msg.variant * (imgSize + 20) + 20;
+        rect.x = slotIndex * (imgSize + 20) + 20;
         rect.y = 30;
         rect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
         rect.setPluginData('pageIndex', String(msg.pageIndex));
         rect.setPluginData('variant', String(msg.variant));
         rect.setPluginData('backgroundType', msg.backgroundType);
         rect.setPluginData('imageHash', imageHash);
-
-        // Remove existing image with same variant
-        const existing = storageFrame.findOne(
-          (n) => n.name === `scene-img-${msg.pageIndex}-${msg.variant}`
-        );
-        if (existing) existing.remove();
+        if (msg.imageId) rect.setPluginData('imageId', msg.imageId);
 
         storageFrame.appendChild(rect);
 
-        // Add label text
+        // Expand frame width if needed
+        const neededWidth = (slotIndex + 1) * (imgSize + 20) + 20;
+        if (storageFrame.width < neededWidth) {
+          storageFrame.resize(neededWidth, storageFrame.height);
+        }
+
+        // Add label
         await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
         const label = figma.createText();
         label.fontName = { family: 'Inter', style: 'Regular' };
-        label.characters = `V${msg.variant + 1} (${msg.backgroundType === 'white' ? '흰배경' : '풀배경'})`;
-        label.fontSize = 14;
+        label.characters = `${msg.backgroundType === 'white' ? 'W' : 'F'}${slotIndex + 1}`;
+        label.fontSize = 12;
         label.x = rect.x;
-        label.y = rect.y - 18;
+        label.y = rect.y - 16;
         label.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
-        label.name = `label-${msg.variant}`;
-        // Remove existing label
-        const existingLabel = storageFrame.findOne(n => n.name === `label-${msg.variant}`);
-        if (existingLabel) existingLabel.remove();
+        label.name = `label-${msg.imageId || msg.variant}`;
         storageFrame.appendChild(label);
 
         figma.ui.postMessage({
@@ -2060,6 +2060,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           pageIndex: msg.pageIndex,
           variant: msg.variant,
           imageHash,
+          imageId: msg.imageId,
         });
       } catch (err: any) {
         figma.ui.postMessage({
@@ -2073,7 +2074,6 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
     case 'SELECT_SCENE_IMAGE': {
       try {
-        // Find the storage frame for this page
         const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
         const storageFrame = figma.currentPage.findOne(
           (n) => n.name === storageName && n.type === 'FRAME'
@@ -2083,10 +2083,18 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           throw new Error(`No images stored for page ${msg.pageIndex + 1}`);
         }
 
-        // Find the selected variant's image hash
-        const variantRect = storageFrame.findOne(
-          (n) => n.name === `scene-img-${msg.pageIndex}-${msg.variant}` && n.type === 'RECTANGLE'
-        ) as RectangleNode | null;
+        // Prefer imageId lookup, fall back to variant name
+        let variantRect: RectangleNode | null = null;
+        if (msg.imageId) {
+          variantRect = storageFrame.findOne(
+            (n) => n.type === 'RECTANGLE' && n.getPluginData('imageId') === msg.imageId
+          ) as RectangleNode | null;
+        }
+        if (!variantRect) {
+          variantRect = storageFrame.findOne(
+            (n) => n.name === `scene-img-${msg.pageIndex}-${msg.variant}` && n.type === 'RECTANGLE'
+          ) as RectangleNode | null;
+        }
 
         if (!variantRect) {
           throw new Error(`Variant ${msg.variant} not found for page ${msg.pageIndex + 1}`);
@@ -2135,6 +2143,49 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           type: 'ERROR',
           message: `Failed to select scene image`,
           detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_IMAGE_PLACEMENT': {
+      try {
+        const placements: Array<{ pageIndex: number; x: number; y: number; width: number; height: number }> = [];
+
+        for (const pageIndex of msg.pageIndices) {
+          const pageName = FRAME_NAMES.part1Page(pageIndex);
+          const pageFrame = figma.currentPage.findOne(
+            (n) => n.name === pageName && n.type === 'FRAME'
+          ) as FrameNode | null;
+
+          if (!pageFrame) continue;
+
+          const sceneImg = pageFrame.findOne(
+            (n) => n.name === 'scene-image' && n.type === 'RECTANGLE'
+          ) as RectangleNode | null;
+
+          if (sceneImg) {
+            const placement = {
+              pageIndex,
+              x: sceneImg.x,
+              y: sceneImg.y,
+              width: sceneImg.width,
+              height: sceneImg.height,
+            };
+            placements.push(placement);
+            // Save placement data directly on the page frame
+            pageFrame.setPluginData('imagePlacement', JSON.stringify(placement));
+          }
+        }
+
+        figma.ui.postMessage({
+          type: 'IMAGE_PLACEMENT_SAVED',
+          success: true,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'IMAGE_PLACEMENT_SAVED',
+          success: false,
         });
       }
       return true;
