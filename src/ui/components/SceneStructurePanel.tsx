@@ -74,7 +74,8 @@ ${JSON.stringify(pageDialogues, null, 2)}
     "keyObjects": [
       {"name": "object name (영어)", "description": "appearance and state (영어)"}
     ],
-    "sceneDescription": "장면 전체 요약 (한국어, UI 표시용)"
+    "sceneDescription": "장면 전체 요약 (한국어, UI 표시용)",
+    "imageSceneDescription": "Full scene description for image generation (영어, 1-2 sentences describing the entire scene composition)"
   }
 ]
 
@@ -84,7 +85,8 @@ ${JSON.stringify(pageDialogues, null, 2)}
 3. background의 setting/time/mood/details는 모두 영어로 작성 (이미지 생성 프롬프트에 직접 사용됨)
 4. characterActions의 action/expression/position도 영어로 작성
 5. keyObjects가 없으면 빈 배열 []
-6. sceneDescription만 한국어로 작성 (UI 표시용)
+6. sceneDescription은 한국어 (UI 표시용), imageSceneDescription은 영어 (이미지 프롬프트용)
+7. imageSceneDescription: 장면 전체를 영어 1-2문장으로 요약 (인물 행동 + 배경 + 분위기를 종합)
 
 JSON 배열만 응답해주세요.`;
 }
@@ -126,10 +128,11 @@ ${text}
   "characterNames": [string],
   "characterActions": {"이름": {"action": string, "expression": string, "position": string}},
   "keyObjects": [{"name": string, "description": string}],
-  "sceneDescription": string (한국어)
+  "sceneDescription": string (한국어),
+  "imageSceneDescription": string (영어, 장면 전체를 1-2문장으로 종합 설명)
 }
 
-규칙: characterNames에는 등장인물 시트의 이름만 사용. background/characterActions/keyObjects는 영어. sceneDescription만 한국어.
+규칙: characterNames에는 등장인물 시트의 이름만 사용. background/characterActions/keyObjects/imageSceneDescription는 영어. sceneDescription만 한국어.
 
 JSON 객체만 응답해주세요.`;
 }
@@ -164,6 +167,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
         characterActions: Record<string, { action: string; expression: string; position: string }>;
         keyObjects: Array<{ name: string; description: string }>;
         sceneDescription: string;
+        imageSceneDescription?: string;
       }> = JSON.parse(extractJson(rawJson));
 
       const updated = pages.map((page) => {
@@ -177,6 +181,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
               characterActions: result.characterActions,
               keyObjects: result.keyObjects || [],
               sceneDescription: result.sceneDescription,
+              imageSceneDescription: result.imageSceneDescription || '',
             },
           };
         }
@@ -211,6 +216,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
         characterActions: Record<string, { action: string; expression: string; position: string }>;
         keyObjects: Array<{ name: string; description: string }>;
         sceneDescription: string;
+        imageSceneDescription?: string;
       }> = JSON.parse(extractJson(rawJson));
 
       const updated = pages.map((page) => {
@@ -224,6 +230,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
               characterActions: result.characterActions,
               keyObjects: result.keyObjects || [],
               sceneDescription: result.sceneDescription,
+              imageSceneDescription: result.imageSceneDescription || '',
             },
           };
         }
@@ -273,6 +280,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
                 characterActions: result.characterActions,
                 keyObjects: result.keyObjects || [],
                 sceneDescription: result.sceneDescription,
+              imageSceneDescription: result.imageSceneDescription || '',
               } as SceneAnalysis,
             };
           }
@@ -567,6 +575,16 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
                   <div style={{ fontSize: 11, color: '#333', background: '#F9F9F9', padding: 6, borderRadius: 4, lineHeight: 1.4 }}>
                     {analysis.sceneDescription}
                   </div>
+
+                  {/* Image scene description (English) */}
+                  {analysis.imageSceneDescription && (
+                    <>
+                      <div style={labelStyle}>이미지 장면 설명 (EN)</div>
+                      <div style={{ fontSize: 10, color: '#18A0FB', background: '#F0F8FF', padding: 6, borderRadius: 4, lineHeight: 1.4, fontStyle: 'italic' }}>
+                        {analysis.imageSceneDescription}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 

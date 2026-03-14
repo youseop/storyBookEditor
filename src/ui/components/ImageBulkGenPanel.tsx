@@ -10,13 +10,15 @@ import ImageHoverPreview from './ImageHoverPreview';
 function buildImagePrompt(
   page: StoryPage,
   characters: Character[],
-  styleDescription: string,
   bgType: 'white' | 'full',
 ): string {
   const analysis = page.sceneAnalysis;
   if (!analysis) return page.textBlocks.flat().join(' ');
 
-  // Build character descriptions from sheet
+  // Scene overview
+  const sceneOverview = analysis.imageSceneDescription || analysis.sceneDescription;
+
+  // Build character descriptions from Character sheet + scene actions
   const charDescriptions = analysis.characterNames
     .map((name) => {
       const char = characters.find((c) => c.name === name);
@@ -26,23 +28,39 @@ function buildImagePrompt(
       const action = charAction?.action || '';
       const expression = charAction?.expression || '';
       const position = charAction?.position || '';
-      return `${name} (${appearance}) - ${action}, ${expression}, ${position}`;
+      return `${name} (${appearance}) - ${action}, ${expression}, at ${position}`;
     })
     .filter(Boolean)
     .join('. ');
 
-  // Build key objects
+  // Key objects
   const objects = analysis.keyObjects
     .map((o) => `${o.name}: ${o.description}`)
     .join('. ');
 
+  const objectsPart = objects ? `Key objects: ${objects}. ` : '';
+
   if (bgType === 'white') {
-    // White background: characters only, no background setting
-    return `Children's book illustration. Clean white background. ${charDescriptions}. ${objects ? `Key objects: ${objects}. ` : ''}Style: ${styleDescription}. No text, illustration only.`;
+    return [
+      `High-quality 4K children's book illustration, 1:1 square format.`,
+      `Scene: ${sceneOverview}`,
+      `Clean pure white background, no environment or scenery.`,
+      `Characters: ${charDescriptions}.`,
+      objectsPart,
+      `Draw in the exact same art style as the reference image provided.`,
+      `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
+    ].filter(Boolean).join(' ');
   } else {
-    // Full background: include setting
     const bg = analysis.background;
-    return `Children's book illustration. Setting: ${bg.setting}, ${bg.time}, ${bg.mood}. ${bg.details}. Characters: ${charDescriptions}. ${objects ? `Key objects: ${objects}. ` : ''}Style: ${styleDescription}. No text, illustration only.`;
+    return [
+      `High-quality 4K children's book illustration, 1:1 square format.`,
+      `Scene: ${sceneOverview}`,
+      `Setting: ${bg.setting}. Time: ${bg.time}. Mood: ${bg.mood}. ${bg.details}`,
+      `Characters: ${charDescriptions}.`,
+      objectsPart,
+      `Draw in the exact same art style as the reference image provided.`,
+      `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
+    ].filter(Boolean).join(' ');
   }
 }
 
@@ -162,7 +180,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
       for (const page of pagesToGen) {
         for (const bgType of ['white', 'full'] as const) {
-          const scenePrompt = buildImagePrompt(page, characters, styleDescription, bgType);
+          const scenePrompt = buildImagePrompt(page, characters, bgType);
           try {
             const images = await generateSceneImages(
               apiKey,
@@ -301,7 +319,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let completedCount = 0;
 
       for (const bgType of ['white', 'full'] as const) {
-        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, styleDescription, bgType);
+        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, bgType);
         try {
           const images = await generateSceneImages(
             apiKey,

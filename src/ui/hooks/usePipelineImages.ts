@@ -201,6 +201,8 @@ export function usePipelineImages(): UsePipelineImagesReturn {
   );
 
   // --- Scene images (Step 7) ---
+  // Prompt is pre-built by buildImagePrompt() in ImageBulkGenPanel.
+  // This function just handles rate limiting, progress, and abort.
   const generateSceneImages = useCallback(
     async (
       apiKey: string,
@@ -211,15 +213,10 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       count: number = 2,
       onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
-      const bgInstruction =
-        bgType === 'white'
-          ? '흰색 배경 위에 장면을 그려줘.'
-          : '풍경/배경이 가득 차도록 그려줘.';
-
       const prompts = Array.from({ length: count }, (_, i) => ({
-        prompt: `동화 장면 일러스트를 생성해줘. ${scenePrompt}. 스타일: ${styleDesc}. ${bgInstruction} 텍스트 없이 이미지만 생성해줘. 변형 ${i + 1}/${count}.`,
+        prompt: `${scenePrompt} Variation ${i + 1} of ${count}.`,
         refImage: refImageBase64,
-        aspectRatio: '3:4',
+        aspectRatio: '1:1',
       }));
       return generateBatch(apiKey, prompts, onImageReady);
     },

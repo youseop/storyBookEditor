@@ -143,7 +143,8 @@ export interface SceneAnalysis {
     name: string;
     description: string;
   }>;
-  sceneDescription: string;  // 전체 장면 요약
+  sceneDescription: string;       // 전체 장면 요약 (한국어, UI 표시용)
+  imageSceneDescription: string;  // 전체 장면 설명 (영어, 이미지 프롬프트용)
 }
 
 // Pipeline state persisted in pluginData
