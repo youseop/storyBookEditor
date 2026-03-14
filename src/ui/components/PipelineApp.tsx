@@ -46,7 +46,8 @@ const PipelineApp: React.FC = () => {
   // Settings & Log UI state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLogOpen, setIsLogOpen] = useState(false);
-  const [snapshotInfo, setSnapshotInfo] = useState<Array<{ slot: number; label: string; timestamp: string }>>([]);
+  const [snapshotInfo, setSnapshotInfo] = useState<Array<{ slot: number; label: string; timestamp: string; hasState?: boolean }>>([]);
+  const [galleryEntries, setGalleryEntries] = useState<Array<{ category: string; imageId: string; label: string; metadata?: string }>>([]);
 
   // Get API key from pipeline state or localStorage
   const [apiKey, setApiKey] = useState('');
@@ -117,8 +118,16 @@ const PipelineApp: React.FC = () => {
         // Refresh snapshot info
         postToPlugin({ type: 'DETECT_STEP_STATUS' });
         break;
+      case 'SNAPSHOT_RESTORED':
+        if ((msg as any).success) {
+          // State will be restored via PIPELINE_STATE_LOADED that follows
+        }
+        break;
       case 'API_KEY_LOADED':
         setApiKey(msg.apiKey);
+        break;
+      case 'GALLERY_LOADED':
+        setGalleryEntries((msg as any).entries || []);
         break;
     }
   }, []));
@@ -602,8 +611,7 @@ const PipelineApp: React.FC = () => {
                     borderRadius: 3,
                     overflow: 'hidden',
                     whiteSpace: 'nowrap',
-                    textOverflow: 'ellipsis',
-                    maxWidth: 140,
+                    maxWidth: 160,
                   }}
                   title={`${snap.label}\n${snap.timestamp}`}
                 >
@@ -612,9 +620,30 @@ const PipelineApp: React.FC = () => {
                     background: snap.slot === 1 ? '#18A0FB' : '#CCC',
                     flexShrink: 0,
                   }} />
-                  <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span style={{ color: '#666', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {timeStr}
                   </span>
+                  {snap.hasState && (
+                    <button
+                      onClick={() => {
+                        if (confirm('이 스냅샷으로 복원하시겠습니까? 현재 작업이 덮어씌워집니다.')) {
+                          postToPlugin({ type: 'RESTORE_SNAPSHOT', slot: snap.slot });
+                        }
+                      }}
+                      style={{
+                        fontSize: 9,
+                        padding: '1px 4px',
+                        background: '#F5A623',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 2,
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      복원
+                    </button>
+                  )}
                 </div>
               );
             })}

@@ -359,6 +359,11 @@ export interface CreateSnapshotMessage {
   label: string;
 }
 
+export interface RestoreSnapshotMessage {
+  type: 'RESTORE_SNAPSHOT';
+  slot: number;
+}
+
 export interface UpdateProgressDisplayMessage {
   type: 'UPDATE_PROGRESS_DISPLAY';
   currentStep: number;
@@ -534,6 +539,12 @@ export interface SnapshotCreatedMessage {
   label: string;
 }
 
+export interface SnapshotRestoredMessage {
+  type: 'SNAPSHOT_RESTORED';
+  success: boolean;
+  slot: number;
+}
+
 export interface Part2PagesCreatedMessage {
   type: 'PART2_PAGES_CREATED';
   pageCount: number;
@@ -623,7 +634,8 @@ export type UIToSandboxMessage =
   | SaveCharacterImageMessage
   | SaveToGalleryMessage
   | LoadGalleryMessage
-  | DetectStepStatusMessage;
+  | DetectStepStatusMessage
+  | RestoreSnapshotMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -657,4 +669,5 @@ export type SandboxToUIMessage =
   | SceneAnalysisSavedMessage
   | BulkTranslationsSavedMessage
   | GalleryLoadedMessage
-  | StepStatusDetectedMessage;
+  | StepStatusDetectedMessage
+  | SnapshotRestoredMessage;

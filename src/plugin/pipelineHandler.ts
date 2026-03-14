@@ -3044,6 +3044,50 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
+    case 'RESTORE_SNAPSHOT': {
+      try {
+        const snapFrame = figma.currentPage.findOne(
+          n => n.name === FRAME_NAMES.snapshotSlot(msg.slot)
+        ) as FrameNode | null;
+
+        if (!snapFrame) {
+          throw new Error(`Snapshot slot ${msg.slot} not found`);
+        }
+
+        const stateJson = snapFrame.getPluginData('pk-snapshot-state');
+        if (!stateJson) {
+          throw new Error('Snapshot does not contain saved state');
+        }
+
+        const restoredState = JSON.parse(stateJson);
+        savePipelineState(restoredState);
+
+        figma.ui.postMessage({
+          type: 'SNAPSHOT_RESTORED',
+          success: true,
+          slot: msg.slot,
+        });
+
+        // Send restored state to UI
+        figma.ui.postMessage({
+          type: 'PIPELINE_STATE_LOADED',
+          state: restoredState,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'SNAPSHOT_RESTORED',
+          success: false,
+          slot: msg.slot,
+        });
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to restore snapshot',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
     default:
       return false; // Not a pipeline message
   }
