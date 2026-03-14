@@ -275,7 +275,7 @@ async function updateProgressDisplay(
     const { rangeStart, rangeEnd } = phases[i];
 
     // Determine phase status
-    const isCompleted = completedSteps.some((s) => s >= rangeEnd);
+    const isCompleted = completedSteps.includes(rangeEnd as number);
     const isCurrent = currentStep >= rangeStart && currentStep <= rangeEnd;
 
     // Draw connecting line (except after last phase)

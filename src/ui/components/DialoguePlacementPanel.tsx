@@ -29,13 +29,21 @@ const DialoguePlacementPanel: React.FC<DialoguePlacementPanelProps> = ({
 
   const getTemplateForPage = useCallback(
     (pageIndex: number): DialogueTemplate => {
-      return pageOverrides[pageIndex] ?? defaultTemplate;
+      return pageOverrides[pageIndex] || defaultTemplate;
     },
     [pageOverrides, defaultTemplate],
   );
 
-  const handlePageOverride = useCallback((pageIndex: number, template: DialogueTemplate) => {
-    setPageOverrides((prev) => ({ ...prev, [pageIndex]: template }));
+  const handlePageOverride = useCallback((pageIndex: number, template: string) => {
+    if (!template) {
+      setPageOverrides((prev) => {
+        const next = { ...prev };
+        delete next[pageIndex];
+        return next;
+      });
+    } else {
+      setPageOverrides((prev) => ({ ...prev, [pageIndex]: template as DialogueTemplate }));
+    }
   }, []);
 
   const handlePlaceSingle = useCallback(
@@ -242,7 +250,7 @@ const DialoguePlacementPanel: React.FC<DialoguePlacementPanelProps> = ({
                   style={selectStyle}
                   value={currentTemplate}
                   onChange={(e) =>
-                    handlePageOverride(page.pageIndex, e.target.value as DialogueTemplate)
+                    handlePageOverride(page.pageIndex, e.target.value)
                   }
                 >
                   <option value="">기본 사용</option>

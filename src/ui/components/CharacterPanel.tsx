@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
-import { callGemini } from '../utils/geminiApi';
+import { callGemini, extractJson } from '../utils/geminiApi';
 import type { Character } from '../../shared/pipeline';
 
 interface CharacterPanelProps {
@@ -46,7 +46,7 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
         throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
       }
 
-      const parsed = JSON.parse(result);
+      const parsed = JSON.parse(extractJson(result));
       const charArray = Array.isArray(parsed) ? parsed : parsed.characters || [];
 
       const newCharacters: Character[] = charArray.map((c: any) => ({

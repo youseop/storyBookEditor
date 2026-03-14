@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { callGemini } from '../utils/geminiApi';
+import { callGemini, extractJson } from '../utils/geminiApi';
 import type { StoryPage } from '../../shared/pipeline';
 
 interface BulkTranslatePanelProps {
@@ -54,7 +54,7 @@ ${JSON.stringify(input, null, 2)}
 JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 
       const rawJson = await callGemini(apiKey, prompt);
-      const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(rawJson);
+      const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(extractJson(rawJson));
 
       const newTranslations: Record<number, string[][]> = {};
       results.forEach((r) => {
@@ -93,12 +93,15 @@ ${JSON.stringify(input, null, 2)}
 JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 
         const rawJson = await callGemini(apiKey, prompt);
-        const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(rawJson);
+        const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(extractJson(rawJson));
 
         if (results.length > 0) {
-          const updated = { ...translations, [pageIndex]: results[0].translatedBlocks };
-          setTranslations(updated);
-          onTranslationsChange(updated);
+          const translatedBlocks = results[0].translatedBlocks;
+          setTranslations(prev => {
+            const updated = { ...prev, [pageIndex]: translatedBlocks };
+            onTranslationsChange(updated);
+            return updated;
+          });
         }
       } catch (err: any) {
         setError(`페이지 ${pageIndex + 1} 재번역 오류: ${err.message}`);
@@ -106,7 +109,7 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
         setRetranslatingPage(null);
       }
     },
-    [pages, apiKey, translations, onTranslationsChange],
+    [pages, apiKey, onTranslationsChange],
   );
 
   const handleReviewPage = useCallback(

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
-import { callGemini, getPageTextPreview } from '../utils/geminiApi';
+import { callGemini, extractJson, getPageTextPreview } from '../utils/geminiApi';
 import type { StoryPage, Character, SceneAnalysis } from '../../shared/pipeline';
 
 interface SceneStructurePanelProps {
@@ -26,7 +26,7 @@ function buildAllPagesPrompt(pages: StoryPage[], characters: Character[]): strin
 등장인물 목록:
 ${charList}
 
-각 페이지: {pageIndex: number, characters: [{characterId: string, action: string}], sceneDescription: string, imagePrompt: string, backgroundType: 'white'|'full'}
+각 페이지: {pageIndex: number (1부터 시작), characters: [{characterId: string, action: string}], sceneDescription: string, imagePrompt: string, backgroundType: 'white'|'full'}
 backgroundType은 동작 중심 장면은 'white', 공간/상황 중심 장면은 'full'로 설정.
 
 페이지 내용:
@@ -82,7 +82,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
         sceneDescription: string;
         imagePrompt: string;
         backgroundType: 'white' | 'full';
-      }> = JSON.parse(rawJson);
+      }> = JSON.parse(extractJson(rawJson));
 
       const updated = pages.map((page) => {
         const result = results.find((r) => r.pageIndex === page.pageIndex + 1);
@@ -119,7 +119,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       try {
         const prompt = buildSinglePagePrompt(page, characters);
         const rawJson = await callGemini(apiKey, prompt);
-        const result = JSON.parse(rawJson);
+        const result = JSON.parse(extractJson(rawJson));
 
         const updated = pages.map((p) => {
           if (p.pageIndex === pageIndex) {

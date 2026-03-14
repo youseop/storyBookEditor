@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
-import { callGemini } from '../utils/geminiApi';
+import { callGemini, extractJson } from '../utils/geminiApi';
 import type { ExpressionCard } from '../../shared/messageTypes';
 import type { StoryPage } from '../../shared/pipeline';
 
@@ -87,7 +87,7 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
       const results: Array<{
         pageIndex: number;
         expressions: Array<{ id: string; english: string }>;
-      }> = JSON.parse(rawJson);
+      }> = JSON.parse(extractJson(rawJson));
 
       results.forEach((pageResult) => {
         const existingCards = keyExpressions[pageResult.pageIndex] ?? [];
