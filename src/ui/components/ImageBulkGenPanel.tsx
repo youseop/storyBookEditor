@@ -4,6 +4,8 @@ import { postToPlugin } from '../hooks/useFigmaMessages';
 import { base64ToUint8Array } from '../services/geminiService';
 import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
 import type { StoryPage, Character } from '../../shared/pipeline';
+import ImageStrip from './ImageStrip';
+import ImageHoverPreview from './ImageHoverPreview';
 
 interface ImageBulkGenPanelProps {
   pages: StoryPage[];
@@ -14,25 +16,10 @@ interface ImageBulkGenPanelProps {
   onImageSelect: (pageIndex: number, variant: number) => void;
 }
 
-interface SlotData {
-  label: string;
-  bgType: 'white' | 'full';
-  image?: GeneratedImage;
-}
-
 interface PageImageState {
-  slots: SlotData[];
-  selectedVariant: number | null;
+  images: GeneratedImage[];
+  selectedImageId: string | null;
   customPrompt: string;
-}
-
-function createInitialSlots(): SlotData[] {
-  return [
-    { label: '흰 배경 1', bgType: 'white' },
-    { label: '흰 배경 2', bgType: 'white' },
-    { label: '풀 배경 1', bgType: 'full' },
-    { label: '풀 배경 2', bgType: 'full' },
-  ];
 }
 
 const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
@@ -49,8 +36,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     const init: Record<number, PageImageState> = {};
     nonEmptyPages.forEach((p) => {
       init[p.pageIndex] = {
-        slots: createInitialSlots(),
-        selectedVariant: null,
+        images: [],
+        selectedImageId: null,
         customPrompt: '',
       };
     });
@@ -60,6 +47,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ base64: string; x: number; y: number } | null>(null);
 
   const {
     generateSceneImages,
@@ -88,10 +76,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           page.sceneAnalysis?.imagePrompt ||
           page.textBlocks.flat().join(' ');
 
-        // Generate 2 white bg + 2 full bg
         for (const bgType of ['white', 'full'] as const) {
-          const slotStartIdx = bgType === 'white' ? 0 : 2;
-
           try {
             const images = await generateSceneImages(
               apiKey,
@@ -102,37 +87,34 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               2,
             );
 
-            // Update slots with generated images
-            setImageStates((prev) => {
-              const prevState = prev[page.pageIndex] || {
-                slots: createInitialSlots(),
-                selectedVariant: null,
-                customPrompt: '',
-              };
-              const newSlots = [...prevState.slots];
-              images.forEach((img, imgIdx) => {
-                const slotIdx = slotStartIdx + imgIdx;
-                if (slotIdx < newSlots.length) {
-                  newSlots[slotIdx] = {
-                    ...newSlots[slotIdx],
-                    image: img,
-                  };
-                }
+            images.forEach((img, imgIdx) => {
+              const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
 
-                // Send to sandbox for storage
-                const bytes = base64ToUint8Array(img.base64);
-                postToPlugin({
-                  type: 'STORE_SCENE_IMAGE',
-                  pageIndex: page.pageIndex,
-                  imageBytes: Array.from(bytes),
-                  variant: slotIdx,
-                  backgroundType: bgType,
-                });
+              // Append to images list
+              setImageStates((prev) => {
+                const prevState = prev[page.pageIndex] || {
+                  images: [],
+                  selectedImageId: null,
+                  customPrompt: '',
+                };
+                return {
+                  ...prev,
+                  [page.pageIndex]: {
+                    ...prevState,
+                    images: [img, ...prevState.images],
+                  },
+                };
               });
-              return {
-                ...prev,
-                [page.pageIndex]: { ...prevState, slots: newSlots },
-              };
+
+              // Send to sandbox for storage
+              const bytes = base64ToUint8Array(img.base64);
+              postToPlugin({
+                type: 'STORE_SCENE_IMAGE',
+                pageIndex: page.pageIndex,
+                imageBytes: Array.from(bytes),
+                variant,
+                backgroundType: bgType,
+              });
             });
           } catch (err: any) {
             if (err.message === 'Cancelled') break;
@@ -164,25 +146,36 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     setProgress({ current: 0, total: 0 });
   }, [cancelPipelineGen]);
 
-  const handleSelectVariant = useCallback(
-    (pageIndex: number, variant: number) => {
+  const handleHoverImage = useCallback((base64: string | null, event: React.MouseEvent | null) => {
+    if (base64 && event) {
+      setHoverPreview({ base64, x: event.clientX, y: event.clientY });
+    } else {
+      setHoverPreview(null);
+    }
+  }, []);
+
+  const handleSelectImage = useCallback(
+    (pageIndex: number, imageId: string) => {
       setImageStates((prev) => ({
         ...prev,
         [pageIndex]: {
           ...prev[pageIndex],
-          selectedVariant: variant,
+          selectedImageId: imageId,
         },
       }));
 
-      // Notify sandbox of selection
+      // Find variant index for the image
+      const state = imageStates[pageIndex];
+      const imgIndex = state?.images.findIndex((img) => img.id === imageId) ?? 0;
+
       postToPlugin({
         type: 'SELECT_SCENE_IMAGE',
         pageIndex,
-        variant,
+        variant: imgIndex,
       });
-      onImageSelect(pageIndex, variant);
+      onImageSelect(pageIndex, imgIndex);
     },
-    [onImageSelect],
+    [onImageSelect, imageStates],
   );
 
   const handleCustomPromptChange = useCallback((pageIndex: number, prompt: string) => {
@@ -216,8 +209,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let completedCount = 0;
 
       for (const bgType of ['white', 'full'] as const) {
-        const slotStartIdx = bgType === 'white' ? 0 : 2;
-
         try {
           const images = await generateSceneImages(
             apiKey,
@@ -228,28 +219,29 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             2,
           );
 
-          setImageStates((prev) => {
-            const prevState = prev[pageIndex];
-            const newSlots = [...prevState.slots];
-            images.forEach((img, imgIdx) => {
-              const slotIdx = slotStartIdx + imgIdx;
-              if (slotIdx < newSlots.length) {
-                newSlots[slotIdx] = { ...newSlots[slotIdx], image: img };
-              }
+          images.forEach((img, imgIdx) => {
+            const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
 
-              const bytes = base64ToUint8Array(img.base64);
-              postToPlugin({
-                type: 'STORE_SCENE_IMAGE',
-                pageIndex,
-                imageBytes: Array.from(bytes),
-                variant: slotIdx,
-                backgroundType: bgType,
-              });
+            setImageStates((prev) => {
+              const prevState = prev[pageIndex];
+              return {
+                ...prev,
+                [pageIndex]: {
+                  ...prevState,
+                  images: [img, ...prevState.images],
+                  selectedImageId: null,
+                },
+              };
             });
-            return {
-              ...prev,
-              [pageIndex]: { ...prevState, slots: newSlots, selectedVariant: null },
-            };
+
+            const bytes = base64ToUint8Array(img.base64);
+            postToPlugin({
+              type: 'STORE_SCENE_IMAGE',
+              pageIndex,
+              imageBytes: Array.from(bytes),
+              variant,
+              backgroundType: bgType,
+            });
           });
         } catch (err: any) {
           if (err.message !== 'Cancelled') {
@@ -355,32 +347,6 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     marginBottom: 8,
   };
 
-  const gridStyle: React.CSSProperties = {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 6,
-    marginBottom: 8,
-  };
-
-  const slotStyle = (selected: boolean): React.CSSProperties => ({
-    width: 80,
-    height: 80,
-    background: '#F5F5F5',
-    border: selected ? '2px solid #18A0FB' : '1px solid #E5E5E5',
-    borderRadius: 4,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    fontSize: 9,
-    color: '#999',
-    textAlign: 'center',
-    transition: 'border-color 0.15s',
-    overflow: 'hidden',
-    position: 'relative',
-    padding: 0,
-  });
-
   const errorStyle: React.CSSProperties = {
     fontSize: 11,
     color: '#E53E3E',
@@ -483,44 +449,24 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               </div>
               <div style={textPreviewStyle}>{getPageTextPreview(page)}</div>
 
-              {/* 2x2 image slot grid */}
-              <div style={gridStyle}>
-                {state.slots.map((slot, idx) => (
-                  <div
-                    key={idx}
-                    style={slotStyle(state.selectedVariant === idx)}
-                    onClick={() => handleSelectVariant(page.pageIndex, idx)}
-                  >
-                    {slot.image ? (
-                      <>
-                        <img
-                          src={`data:image/png;base64,${slot.image.base64}`}
-                          alt={slot.label}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                        {state.selectedVariant === idx && (
-                          <div style={{
-                            position: 'absolute',
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            background: 'rgba(24, 160, 251, 0.8)',
-                            color: '#fff',
-                            fontSize: 8,
-                            textAlign: 'center',
-                            padding: '1px 0',
-                            fontWeight: 600,
-                          }}>
-                            선택
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      slot.label
-                    )}
-                  </div>
-                ))}
-              </div>
+              {/* Image strip */}
+              {state.images.length > 0 ? (
+                <ImageStrip
+                  images={state.images.map((img) => ({
+                    id: img.id,
+                    base64: img.base64,
+                    prompt: img.prompt,
+                  }))}
+                  selectedId={state.selectedImageId ?? undefined}
+                  onSelect={(id) => handleSelectImage(page.pageIndex, id)}
+                  imageSize={72}
+                  onHoverImage={handleHoverImage}
+                />
+              ) : (
+                <div style={{ fontSize: 11, color: '#AAA', fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>
+                  이미지를 생성하세요
+                </div>
+              )}
 
               {/* Regenerate with custom prompt */}
               <div style={regenRowStyle}>
@@ -552,6 +498,14 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       <div style={noteStyle}>
         페이지당 4장 (흰 배경 2장 + 풀 배경 2장)이 생성됩니다
       </div>
+
+      {hoverPreview && (
+        <ImageHoverPreview
+          imageBase64={hoverPreview.base64}
+          mouseX={hoverPreview.x}
+          mouseY={hoverPreview.y}
+        />
+      )}
     </div>
   );
 };

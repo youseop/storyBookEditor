@@ -4,6 +4,8 @@ import { useGeminiApi } from '../hooks/useGeminiApi';
 import type { ExpressionCard, ImageMeta, SandboxToUIMessage, ContentIdMap } from '../../shared/messageTypes';
 import { CARD_EN_PLACEHOLDER } from '../../shared/constants';
 import type { StoryPage } from '../../shared/pipeline';
+import ImageStrip, { type ImageStripItem } from './ImageStrip';
+import ImageHoverPreview from './ImageHoverPreview';
 
 interface KeyExprTransImgPanelProps {
   pages: StoryPage[];
@@ -47,6 +49,7 @@ const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
   const [generatedImages, setGeneratedImages] = useState<Map<string, ImageMeta[]>>(new Map());
   const [customPrompts, setCustomPrompts] = useState<Record<string, string>>({});
   const [regenExprId, setRegenExprId] = useState<string | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ base64: string; x: number; y: number } | null>(null);
 
   const nonEmptyPages = useMemo(() => pages.filter((p) => !p.isEmpty), [pages]);
 
@@ -463,6 +466,14 @@ const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
     }
   }, [allExpressions, frameIds, generatedImages]);
 
+  const handleHoverImage = useCallback((base64: string | null, event: React.MouseEvent | null) => {
+    if (base64 && event) {
+      setHoverPreview({ base64, x: event.clientX, y: event.clientY });
+    } else {
+      setHoverPreview(null);
+    }
+  }, []);
+
   // --- Styles ---
   const containerStyle: React.CSSProperties = {
     display: 'flex',
@@ -602,51 +613,6 @@ const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
     fontFamily: 'inherit',
   };
 
-  const imageRowStyle: React.CSSProperties = {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-    marginTop: 4,
-    flexWrap: 'wrap',
-  };
-
-  const thumbStyle = (isActive: boolean): React.CSSProperties => ({
-    width: 60,
-    height: 60,
-    borderRadius: 4,
-    border: isActive ? '2px solid #18A0FB' : '1px solid #DDD',
-    background: '#F5F5F5',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 9,
-    color: '#AAA',
-    cursor: 'pointer',
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    position: 'relative' as const,
-    overflow: 'hidden' as const,
-  });
-
-  const thumbImgStyle: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    borderRadius: 3,
-  };
-
-  const activeBadgeStyle: React.CSSProperties = {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    fontSize: 7,
-    fontWeight: 700,
-    color: '#fff',
-    background: '#18A0FB',
-    padding: '1px 3px',
-    borderRadius: 2,
-  };
-
   const regenRowStyle: React.CSSProperties = {
     display: 'flex',
     gap: 4,
@@ -778,27 +744,19 @@ const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
                     {cardImages.length > 0 && (
                       <>
                         <div style={{ ...labelStyle, marginTop: 6 }}>이미지 ({cardImages.length}개)</div>
-                        <div style={imageRowStyle}>
-                          {cardImages.map((img, imgIdx) => (
-                            <div
-                              key={img.imageHash || imgIdx}
-                              style={thumbStyle(img.isActive)}
-                              onClick={() => handleSwapImage(card.id, img.imageHash)}
-                              title={img.isActive ? `Variant #${imgIdx + 1} (활성)` : `Variant #${imgIdx + 1} - 클릭하여 선택`}
-                            >
-                              {img.imageBase64 ? (
-                                <img
-                                  src={`data:image/png;base64,${img.imageBase64}`}
-                                  alt={`Variant ${imgIdx + 1}`}
-                                  style={thumbImgStyle}
-                                />
-                              ) : (
-                                <span>#{imgIdx + 1}</span>
-                              )}
-                              {img.isActive && <div style={activeBadgeStyle}>Active</div>}
-                            </div>
-                          ))}
-                        </div>
+                        <ImageStrip
+                          images={cardImages
+                            .filter((img) => img.imageBase64)
+                            .map((img) => ({
+                              id: img.imageHash,
+                              base64: img.imageBase64!,
+                              prompt: img.prompt,
+                            }))}
+                          selectedId={cardImages.find((img) => img.isActive)?.imageHash}
+                          onSelect={(hash) => handleSwapImage(card.id, hash)}
+                          imageSize={60}
+                          onHoverImage={handleHoverImage}
+                        />
                       </>
                     )}
 
@@ -890,6 +848,14 @@ const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
         <div style={noteStyle}>
           번역과 이미지는 실시간으로 Figma에 반영됩니다
         </div>
+      )}
+
+      {hoverPreview && (
+        <ImageHoverPreview
+          imageBase64={hoverPreview.base64}
+          mouseX={hoverPreview.x}
+          mouseY={hoverPreview.y}
+        />
       )}
     </div>
   );

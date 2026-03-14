@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
 import { callGemini, extractJson } from '../utils/geminiApi';
 import type { Character } from '../../shared/pipeline';
@@ -19,10 +19,31 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
   const [localCharacters, setLocalCharacters] = useState<Character[]>(characters);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isInitialMount = useRef(true);
 
   useEffect(() => {
+    isInitialMount.current = true;
     setLocalCharacters(characters);
   }, [characters]);
+
+  // Auto-save with debounce (skip initial mount)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (localCharacters.length === 0) return;
+
+    const timer = setTimeout(() => {
+      onCharactersChange(localCharacters);
+      postToPlugin({
+        type: 'SAVE_CHARACTERS',
+        characters: localCharacters,
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [localCharacters, onCharactersChange]);
 
   const handleAnalyze = useCallback(async () => {
     if (!storyText.trim()) {

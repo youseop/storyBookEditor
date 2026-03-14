@@ -179,6 +179,12 @@ const Part2PagesPanel: React.FC<Part2PagesPanelProps> = ({
 
   return (
     <div style={containerStyle}>
+      <style>{`
+        @keyframes indeterminate {
+          0% { margin-left: -30%; }
+          100% { margin-left: 100%; }
+        }
+      `}</style>
       <div style={headerStyle}>Step 12: Part 2 페이지 생성</div>
 
       {error && <div style={errorStyle}>{error}</div>}
@@ -241,6 +247,24 @@ const Part2PagesPanel: React.FC<Part2PagesPanelProps> = ({
         >
           {status === 'creating' ? '생성 중...' : 'Part 2 생성'}
         </button>
+      )}
+
+      {status === 'creating' && (
+        <div style={{
+          width: '100%',
+          height: 4,
+          background: '#E5E5E5',
+          borderRadius: 2,
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            width: '30%',
+            height: '100%',
+            background: '#18A0FB',
+            borderRadius: 2,
+            animation: 'indeterminate 1.5s ease-in-out infinite',
+          }} />
+        </div>
       )}
 
       <div style={noteStyle}>

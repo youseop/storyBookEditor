@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
+import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
 
 interface InnerPagesPanelProps {
   keyColorA: string;
@@ -47,37 +48,26 @@ const InnerPagesPanel: React.FC<InnerPagesPanelProps> = ({
     setIsCreating(true);
     setCreatedCount(null);
 
-    parent.postMessage(
-      {
-        pluginMessage: {
-          type: 'CREATE_INNER_PAGES',
-          pages: selected.map((p) => p.id),
-          keyColorA,
-          keyColorB,
-          bookTitle: bookTitle || undefined,
-          bookTitleEn: bookTitleEn || undefined,
-        },
-      },
-      '*'
-    );
+    postToPlugin({
+      type: 'CREATE_INNER_PAGES',
+      pages: selected.map((p) => p.id),
+      keyColorA,
+      keyColorB,
+      bookTitle: bookTitle || undefined,
+      bookTitleEn: bookTitleEn || undefined,
+    });
   }, [pages, keyColorA, keyColorB, bookTitle, bookTitleEn]);
 
   // Listen for response
-  useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const msg = event.data?.pluginMessage;
-      if (!msg) return;
-      if (msg.type === 'INNER_PAGES_CREATED') {
-        setIsCreating(false);
-        setCreatedCount(msg.pageCount);
-      }
-      if (msg.type === 'ERROR' && isCreating) {
-        setIsCreating(false);
-      }
-    };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, [isCreating]);
+  usePluginMessage(useCallback((msg) => {
+    if (msg.type === 'INNER_PAGES_CREATED') {
+      setIsCreating(false);
+      setCreatedCount(msg.pageCount);
+    }
+    if (msg.type === 'ERROR') {
+      setIsCreating(false);
+    }
+  }, []));
 
   const selectedCount = pages.filter((p) => p.checked).length;
 
