@@ -116,6 +116,17 @@ export interface Character {
   confirmed: boolean;
 }
 
+// Key object/space definition
+export interface KeyObject {
+  id: string;
+  name: string;
+  nameEn?: string;
+  description: string;     // visual appearance description
+  category: 'object' | 'space';
+  referenceImageBase64?: string;
+  confirmed: boolean;
+}
+
 // Story page data (from Step 5 page splitting)
 export interface StoryPage {
   pageIndex: number;
@@ -162,6 +173,7 @@ export interface PipelineState {
     colorB: string;
   };
   characters: Character[];
+  keyObjects: KeyObject[];
   pages: StoryPage[];
   // Part 2: translations (pageIndex → translated text blocks)
   translations?: Record<number, string[][]>;
@@ -188,6 +200,7 @@ export function createInitialPipelineState(): PipelineState {
       colorB: '#FFF69B',
     },
     characters: [],
+    keyObjects: [],
     pages: [],
   };
 }

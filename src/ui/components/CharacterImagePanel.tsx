@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import type { Character } from '../../shared/pipeline';
+import type { Character, KeyObject } from '../../shared/pipeline';
 import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
 import { postToPlugin } from '../hooks/useFigmaMessages';
 import ImageStrip from './ImageStrip';
@@ -9,6 +9,8 @@ interface CharacterImagePanelProps {
   characters: Character[];
   onCharacterImageSelect: (characterId: string, imageBase64: string) => void;
   onCharactersChange?: (characters: Character[]) => void;
+  keyObjects: KeyObject[];
+  onKeyObjectImageSelect: (objectId: string, imageBase64: string) => void;
   styleDescription: string;
   referenceImageBase64?: string;
   apiKey: string;
@@ -18,6 +20,8 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
   characters,
   onCharacterImageSelect,
   onCharactersChange,
+  keyObjects,
+  onKeyObjectImageSelect,
   styleDescription,
   referenceImageBase64,
   apiKey,
@@ -25,6 +29,9 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
   // Per-character image list (append-only, newest first)
   const [charImages, setCharImages] = useState<Record<string, GeneratedImage[]>>({});
   const [selectedIds, setSelectedIds] = useState<Record<string, string>>({});
+  // Per-key-object image list
+  const [objectImages, setObjectImages] = useState<Record<string, GeneratedImage[]>>({});
+  const [selectedObjectIds, setSelectedObjectIds] = useState<Record<string, string>>({});
   // Per-character editable fields for re-generation
   const [editedChars, setEditedChars] = useState<Record<string, { name: string; appearance: string }>>({});
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +107,67 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
     const img = images?.find(i => i.id === imageId);
     if (img) onCharacterImageSelect(charId, img.base64);
   }, [charImages, onCharacterImageSelect]);
+
+  // --- Key Object Image Generation ---
+  const makeObjectImageReadyHandler = (objId: string) => (img: GeneratedImage) => {
+    setObjectImages(prev => ({
+      ...prev,
+      [objId]: [img, ...(prev[objId] || [])],
+    }));
+    // Save to gallery
+    const objName = keyObjects.find(o => o.id === objId)?.name || 'Unknown';
+    const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
+    postToPlugin({
+      type: 'SAVE_TO_GALLERY',
+      category: 'character',
+      imageId: img.id,
+      imageBytes: Array.from(bytes),
+      label: `[Obj] ${objName}`,
+      metadata: objId,
+    });
+    // Auto-select first image for this object
+    setSelectedObjectIds(prev => {
+      if (!prev[objId]) {
+        onKeyObjectImageSelect(objId, img.base64);
+        return { ...prev, [objId]: img.id };
+      }
+      return prev;
+    });
+  };
+
+  // Generate 2 images for ALL key objects in parallel
+  const handleGenerateAllObjects = useCallback(async () => {
+    if (!apiKey) { setError('API Key가 설정되지 않았습니다.'); return; }
+    if (!styleDescription.trim()) { setError('스타일 설명이 필요합니다.'); return; }
+    setError(null);
+
+    const styleDesc = styleDescription;
+    const promises = keyObjects.map(obj => {
+      const prompt = `레퍼런스 이미지의 그림 스타일을 그대로 따라서 그려줘. ${obj.category === 'space' ? '장소' : '사물'}: ${obj.name}. 외형: ${obj.description}. 스타일: ${styleDesc}. 깨끗한 흰색 배경. 텍스트 없이 그려줘.`;
+      const charData = { name: obj.name, appearance: prompt };
+      return generateCharacterImages(apiKey, charData, styleDesc, 2, makeObjectImageReadyHandler(obj.id), referenceImageBase64);
+    });
+    await Promise.allSettled(promises);
+  }, [apiKey, styleDescription, keyObjects, generateCharacterImages, referenceImageBase64]);
+
+  // Generate 2 more images for a single key object
+  const handleGenerateMoreObject = useCallback(async (objId: string) => {
+    if (!apiKey) return;
+    setError(null);
+    const obj = keyObjects.find(o => o.id === objId);
+    if (!obj) return;
+    const styleDesc = styleDescription;
+    const prompt = `레퍼런스 이미지의 그림 스타일을 그대로 따라서 그려줘. ${obj.category === 'space' ? '장소' : '사물'}: ${obj.name}. 외형: ${obj.description}. 스타일: ${styleDesc}. 깨끗한 흰색 배경. 텍스트 없이 그려줘.`;
+    const charData = { name: obj.name, appearance: prompt };
+    await generateCharacterImages(apiKey, charData, styleDesc, 2, makeObjectImageReadyHandler(objId), referenceImageBase64);
+  }, [apiKey, styleDescription, keyObjects, generateCharacterImages, referenceImageBase64]);
+
+  const handleSelectObjectImage = useCallback((objId: string, imageId: string) => {
+    setSelectedObjectIds(prev => ({ ...prev, [objId]: imageId }));
+    const images = objectImages[objId];
+    const img = images?.find(i => i.id === imageId);
+    if (img) onKeyObjectImageSelect(objId, img.base64);
+  }, [objectImages, onKeyObjectImageSelect]);
 
   // Edit character fields (auto-propagate to parent)
   const handleEditChar = useCallback((charId: string, field: 'name' | 'appearance', value: string) => {
@@ -225,6 +293,64 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
         <div style={{ textAlign: 'center', color: '#AAA', padding: 20, fontSize: 11 }}>
           Step 3에서 등장인물을 먼저 설정해주세요
         </div>
+      )}
+
+      {/* Key Objects Image Section */}
+      {keyObjects.length > 0 && (
+        <>
+          <div style={{ ...s.header, marginTop: 8 }}>핵심 사물/공간 이미지</div>
+
+          {/* Generate all key object images button */}
+          <button
+            type="button"
+            style={{ ...s.btnPrimary, background: '#8B5CF6', ...(isGenerating || !apiKey || keyObjects.length === 0 ? s.disabled : {}) }}
+            onClick={handleGenerateAllObjects}
+            disabled={isGenerating || !apiKey || keyObjects.length === 0}
+          >
+            {isGenerating ? `생성 중...` : `전체 사물/공간 이미지 생성 (${keyObjects.length}개 × 2장)`}
+          </button>
+
+          {/* Per-key-object cards */}
+          {keyObjects.map(obj => {
+            const images = objectImages[obj.id] || [];
+            const selectedId = selectedObjectIds[obj.id];
+
+            return (
+              <div key={obj.id} style={s.charCard}>
+                <div style={s.charName}>{obj.name || '(이름 없음)'}</div>
+                <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>
+                  [{obj.category === 'space' ? '공간' : '사물'}] {obj.description}
+                </div>
+
+                {/* Image strip */}
+                {images.length > 0 && (
+                  <div style={{ marginBottom: 6 }}>
+                    <ImageStrip
+                      images={images}
+                      selectedId={selectedId}
+                      onSelect={(id) => handleSelectObjectImage(obj.id, id)}
+                      imageSize={68}
+                      onHoverImage={handleHoverImage}
+                    />
+                    <div style={{ fontSize: 9, color: '#999', marginTop: 2 }}>{images.length}장 생성됨</div>
+                  </div>
+                )}
+
+                {/* Add 2 more button */}
+                {!isGenerating && (
+                  <button
+                    type="button"
+                    style={{ ...s.btnOutline, borderColor: '#8B5CF6', color: '#8B5CF6', ...((!apiKey) ? s.disabled : {}) }}
+                    onClick={() => handleGenerateMoreObject(obj.id)}
+                    disabled={!apiKey}
+                  >
+                    +2장 추가 생성
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </>
       )}
 
       <ImageHoverPreview imageBase64={hoverImage} mouseX={hoverPos.x} mouseY={hoverPos.y} />

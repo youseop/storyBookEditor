@@ -12,6 +12,7 @@ function buildImagePrompt(
   characters: Character[],
   bgType: 'white' | 'full',
   styleDescription?: string,
+  keyObjects?: Array<{ name: string; description: string; category: string; referenceImageBase64?: string }>,
 ): string {
   const analysis = page.sceneAnalysis;
   if (!analysis) return page.textBlocks.flat().join(' ');
@@ -41,6 +42,13 @@ function buildImagePrompt(
 
   const objectsPart = objects ? `Key objects: ${objects}. ` : '';
 
+  // Story-level key objects/spaces (from Character sheet)
+  const storyKeyElements = keyObjects
+    ?.filter(o => o.name)
+    .map(o => `${o.name} - ${o.description}`)
+    .join('. ');
+  const storyKeyElementsPart = storyKeyElements ? `Story key elements: ${storyKeyElements}. ` : '';
+
   // Style instruction: use actual style description if available, otherwise generic reference
   const styleInstruction = styleDescription
     ? `Art style: ${styleDescription}. Match the exact style of the reference image provided.`
@@ -53,6 +61,7 @@ function buildImagePrompt(
       `Clean pure white background, no environment or scenery.`,
       `Characters: ${charDescriptions}.`,
       objectsPart,
+      storyKeyElementsPart,
       styleInstruction,
       `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
     ].filter(Boolean).join(' ');
@@ -64,6 +73,7 @@ function buildImagePrompt(
       `Setting: ${bg.setting}. Time: ${bg.time}. Mood: ${bg.mood}. ${bg.details}`,
       `Characters: ${charDescriptions}.`,
       objectsPart,
+      storyKeyElementsPart,
       styleInstruction,
       `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
     ].filter(Boolean).join(' ');
@@ -73,6 +83,7 @@ function buildImagePrompt(
 interface ImageBulkGenPanelProps {
   pages: StoryPage[];
   characters: Character[];
+  keyObjects?: Array<{ name: string; description: string; category: string; referenceImageBase64?: string }>;
   styleDescription: string;
   referenceImageBase64?: string;
   apiKey: string;
@@ -89,6 +100,7 @@ interface PageImageState {
 const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
   pages,
   characters,
+  keyObjects,
   styleDescription,
   referenceImageBase64,
   apiKey,
@@ -204,7 +216,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       const pageFirstImages = new Map<number, string>();
 
       await Promise.all(allJobs.map(async ({ page, bgType }) => {
-        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
+        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription, keyObjects);
         try {
           const images = await generateSceneImages(
             apiKey,
@@ -291,7 +303,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
       setGenerating(false);
     },
-    [apiKey, characters, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
+    [apiKey, characters, keyObjects, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
   );
 
   const handleGenerateFirst4 = useCallback(async () => {
@@ -424,7 +436,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let firstImageId: string | null = null;
 
       await Promise.all((['white', 'full'] as const).map(async (bgType) => {
-        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
+        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription, keyObjects);
         try {
           const images = await generateSceneImages(
             apiKey,
@@ -503,7 +515,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
       setRegeneratingPages(prev => { const next = new Set(prev); next.delete(pageIndex); return next; });
     },
-    [apiKey, imageStates, nonEmptyPages, characters, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
+    [apiKey, imageStates, nonEmptyPages, characters, keyObjects, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
   );
 
   // --- Styles ---

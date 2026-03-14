@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Step, Phase, PipelineState, createInitialPipelineState, getPhaseForStep, STEP_INFO } from '../../shared/pipeline';
 import type { SandboxToUIMessage, ContentIdMap, CardPlacement } from '../../shared/messageTypes';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
-import type { Character } from '../../shared/pipeline';
+import type { Character, KeyObject } from '../../shared/pipeline';
 import StepNavigation from './StepNavigation';
 import StyleSetupPanel from './StyleSetupPanel';
 import KeyColorPanel from './KeyColorPanel';
@@ -303,6 +303,19 @@ const PipelineApp: React.FC = () => {
     });
   }, []);
 
+  const handleKeyObjectsChange = useCallback((keyObjects: KeyObject[]) => {
+    setPipelineState(prev => ({ ...prev, keyObjects }));
+  }, []);
+
+  const handleKeyObjectImageSelect = useCallback((objectId: string, imageBase64: string) => {
+    setPipelineState(prev => {
+      const updatedObjects = prev.keyObjects.map(o =>
+        o.id === objectId ? { ...o, referenceImageBase64: imageBase64, confirmed: true } : o
+      );
+      return { ...prev, keyObjects: updatedObjects };
+    });
+  }, []);
+
   // Key Expression engine handlers
   const handleKeyExprContentIdMapChange = useCallback((pageIndex: number, map: ContentIdMap) => {
     setKeyExprContentIdMaps(prev => ({ ...prev, [pageIndex]: map }));
@@ -335,7 +348,7 @@ const PipelineApp: React.FC = () => {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [
     pipelineState.storyTitle, pipelineState.storyText, pipelineState.characters,
-    pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages,
+    pipelineState.keyObjects, pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages,
     pipelineState.currentStep, pipelineState.completedSteps,
     translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements,
     keyExprFrameIds, keyExprEnLinesMaps,
@@ -375,6 +388,8 @@ const PipelineApp: React.FC = () => {
             storyText={pipelineState.storyText}
             characters={pipelineState.characters}
             onCharactersChange={handleCharactersChange}
+            keyObjects={pipelineState.keyObjects}
+            onKeyObjectsChange={handleKeyObjectsChange}
             apiKey={apiKey}
           />
         );
@@ -384,6 +399,8 @@ const PipelineApp: React.FC = () => {
             characters={pipelineState.characters}
             onCharacterImageSelect={handleCharacterImageSelect}
             onCharactersChange={handleCharactersChange}
+            keyObjects={pipelineState.keyObjects}
+            onKeyObjectImageSelect={handleKeyObjectImageSelect}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
             referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
             apiKey={apiKey}
@@ -415,6 +432,7 @@ const PipelineApp: React.FC = () => {
           <ImageBulkGenPanel
             pages={pipelineState.pages}
             characters={pipelineState.characters}
+            keyObjects={pipelineState.keyObjects}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
             referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
             apiKey={apiKey}
