@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Step, Phase, PipelineState, createInitialPipelineState, getPhaseForStep, STEP_INFO } from '../../shared/pipeline';
-import type { SandboxToUIMessage } from '../../shared/messageTypes';
+import type { SandboxToUIMessage, ContentIdMap, CardPlacement } from '../../shared/messageTypes';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
 import type { Character } from '../../shared/pipeline';
 import StepNavigation from './StepNavigation';
@@ -173,6 +173,29 @@ const PipelineApp: React.FC = () => {
 
   // Key expressions for Part 3 (pageIndex → expression cards)
   const [keyExpressions, setKeyExpressions] = useState<Record<number, import('../../shared/messageTypes').ExpressionCard[]>>({});
+
+  // Key Expression engine state (per page)
+  const [keyExprContentIdMaps, setKeyExprContentIdMaps] = useState<Record<number, ContentIdMap | undefined>>({});
+  const [keyExprPlacements, setKeyExprPlacements] = useState<Record<number, CardPlacement[]>>({});
+  const [keyExprFrameIds, setKeyExprFrameIds] = useState<Record<number, string | undefined>>({});
+  const [keyExprEnLinesMaps, setKeyExprEnLinesMaps] = useState<Record<number, Map<string, string[]>>>({});
+
+  // Key Expression engine handlers
+  const handleKeyExprContentIdMapChange = useCallback((pageIndex: number, map: ContentIdMap) => {
+    setKeyExprContentIdMaps(prev => ({ ...prev, [pageIndex]: map }));
+  }, []);
+
+  const handleKeyExprPlacementsChange = useCallback((pageIndex: number, newPlacements: CardPlacement[]) => {
+    setKeyExprPlacements(prev => ({ ...prev, [pageIndex]: newPlacements }));
+  }, []);
+
+  const handleKeyExprFrameIdChange = useCallback((pageIndex: number, frameId: string) => {
+    setKeyExprFrameIds(prev => ({ ...prev, [pageIndex]: frameId }));
+  }, []);
+
+  const handleKeyExprEnLinesMapChange = useCallback((pageIndex: number, map: Map<string, string[]>) => {
+    setKeyExprEnLinesMaps(prev => ({ ...prev, [pageIndex]: map }));
+  }, []);
 
   // Settings & Log UI state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -347,6 +370,14 @@ const PipelineApp: React.FC = () => {
               setKeyExpressions(prev => ({ ...prev, [pageIndex]: cards }));
             }}
             apiKey={apiKey}
+            contentIdMaps={keyExprContentIdMaps}
+            onContentIdMapChange={handleKeyExprContentIdMapChange}
+            placements={keyExprPlacements}
+            onPlacementsChange={handleKeyExprPlacementsChange}
+            frameIds={keyExprFrameIds}
+            onFrameIdChange={handleKeyExprFrameIdChange}
+            enLinesMaps={keyExprEnLinesMaps}
+            onEnLinesMapChange={handleKeyExprEnLinesMapChange}
           />
         );
       case Step.KEY_EXPR_TRANSLATE_IMG:
@@ -359,6 +390,12 @@ const PipelineApp: React.FC = () => {
             }}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
             apiKey={apiKey}
+            enLinesMaps={keyExprEnLinesMaps}
+            onEnLinesMapChange={handleKeyExprEnLinesMapChange}
+            frameIds={keyExprFrameIds}
+            contentIdMaps={keyExprContentIdMaps}
+            onContentIdMapChange={handleKeyExprContentIdMapChange}
+            referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
           />
         );
       case Step.PART3_CONFIRM:

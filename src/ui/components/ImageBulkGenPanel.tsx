@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { getPageTextPreview } from '../utils/geminiApi';
+import { postToPlugin } from '../hooks/useFigmaMessages';
+import { base64ToUint8Array } from '../services/geminiService';
+import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
 import type { StoryPage, Character } from '../../shared/pipeline';
 
 interface ImageBulkGenPanelProps {
@@ -11,18 +14,24 @@ interface ImageBulkGenPanelProps {
   onImageSelect: (pageIndex: number, variant: number) => void;
 }
 
+interface SlotData {
+  label: string;
+  bgType: 'white' | 'full';
+  image?: GeneratedImage;
+}
+
 interface PageImageState {
-  slots: Array<{ label: string; bgType: 'white' | 'full'; generated: boolean }>;
+  slots: SlotData[];
   selectedVariant: number | null;
   customPrompt: string;
 }
 
-function createInitialSlots(): PageImageState['slots'] {
+function createInitialSlots(): SlotData[] {
   return [
-    { label: '흰 배경 1', bgType: 'white', generated: false },
-    { label: '흰 배경 2', bgType: 'white', generated: false },
-    { label: '풀 배경 1', bgType: 'full', generated: false },
-    { label: '풀 배경 2', bgType: 'full', generated: false },
+    { label: '흰 배경 1', bgType: 'white' },
+    { label: '흰 배경 2', bgType: 'white' },
+    { label: '풀 배경 1', bgType: 'full' },
+    { label: '풀 배경 2', bgType: 'full' },
   ];
 }
 
@@ -50,33 +59,110 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [error, setError] = useState<string | null>(null);
+
+  const {
+    generateSceneImages,
+    cancel: cancelPipelineGen,
+  } = usePipelineImages();
+
+  /**
+   * Generate images for a set of pages. Each page produces 4 images
+   * (2 white bg + 2 full bg).
+   */
+  const generateForPages = useCallback(
+    async (pagesToGen: StoryPage[]) => {
+      if (!apiKey) {
+        setError('API Key가 설정되지 않았습니다. Settings에서 설정해주세요.');
+        return;
+      }
+      setGenerating(true);
+      setError(null);
+      const totalImages = pagesToGen.length * 4;
+      setProgress({ current: 0, total: totalImages });
+
+      let completedCount = 0;
+
+      for (const page of pagesToGen) {
+        const scenePrompt =
+          page.sceneAnalysis?.imagePrompt ||
+          page.textBlocks.flat().join(' ');
+
+        // Generate 2 white bg + 2 full bg
+        for (const bgType of ['white', 'full'] as const) {
+          const slotStartIdx = bgType === 'white' ? 0 : 2;
+
+          try {
+            const images = await generateSceneImages(
+              apiKey,
+              scenePrompt,
+              styleDescription,
+              bgType,
+              referenceImageBase64,
+              2,
+            );
+
+            // Update slots with generated images
+            setImageStates((prev) => {
+              const prevState = prev[page.pageIndex] || {
+                slots: createInitialSlots(),
+                selectedVariant: null,
+                customPrompt: '',
+              };
+              const newSlots = [...prevState.slots];
+              images.forEach((img, imgIdx) => {
+                const slotIdx = slotStartIdx + imgIdx;
+                if (slotIdx < newSlots.length) {
+                  newSlots[slotIdx] = {
+                    ...newSlots[slotIdx],
+                    image: img,
+                  };
+                }
+
+                // Send to sandbox for storage
+                const bytes = base64ToUint8Array(img.base64);
+                postToPlugin({
+                  type: 'STORE_SCENE_IMAGE',
+                  pageIndex: page.pageIndex,
+                  imageBytes: Array.from(bytes),
+                  variant: slotIdx,
+                  backgroundType: bgType,
+                });
+              });
+              return {
+                ...prev,
+                [page.pageIndex]: { ...prevState, slots: newSlots },
+              };
+            });
+          } catch (err: any) {
+            if (err.message === 'Cancelled') break;
+            setError(`Page ${page.pageIndex + 1} (${bgType}): ${err.message}`);
+          }
+
+          completedCount += 2;
+          setProgress({ current: completedCount, total: totalImages });
+        }
+      }
+
+      setGenerating(false);
+    },
+    [apiKey, styleDescription, referenceImageBase64, generateSceneImages],
+  );
 
   const handleGenerateFirst4 = useCallback(async () => {
-    // Placeholder: actual Gemini Image API integration pending
-    setGenerating(true);
     const pagesToGen = nonEmptyPages.slice(0, 4);
-    setProgress({ current: 0, total: pagesToGen.length });
-
-    for (let i = 0; i < pagesToGen.length; i++) {
-      // Simulate generation delay
-      await new Promise((r) => setTimeout(r, 200));
-      setProgress({ current: i + 1, total: pagesToGen.length });
-    }
-
-    setGenerating(false);
-  }, [nonEmptyPages]);
+    await generateForPages(pagesToGen);
+  }, [nonEmptyPages, generateForPages]);
 
   const handleGenerateAll = useCallback(async () => {
-    setGenerating(true);
-    setProgress({ current: 0, total: nonEmptyPages.length });
+    await generateForPages(nonEmptyPages);
+  }, [nonEmptyPages, generateForPages]);
 
-    for (let i = 0; i < nonEmptyPages.length; i++) {
-      await new Promise((r) => setTimeout(r, 200));
-      setProgress({ current: i + 1, total: nonEmptyPages.length });
-    }
-
+  const handleCancel = useCallback(() => {
+    cancelPipelineGen();
     setGenerating(false);
-  }, [nonEmptyPages]);
+    setProgress({ current: 0, total: 0 });
+  }, [cancelPipelineGen]);
 
   const handleSelectVariant = useCallback(
     (pageIndex: number, variant: number) => {
@@ -87,6 +173,13 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           selectedVariant: variant,
         },
       }));
+
+      // Notify sandbox of selection
+      postToPlugin({
+        type: 'SELECT_SCENE_IMAGE',
+        pageIndex,
+        variant,
+      });
       onImageSelect(pageIndex, variant);
     },
     [onImageSelect],
@@ -102,9 +195,76 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     }));
   }, []);
 
-  const handleRegenerate = useCallback((_pageIndex: number) => {
-    // Placeholder for regeneration with custom prompt
-  }, []);
+  const handleRegenerate = useCallback(
+    async (pageIndex: number) => {
+      if (!apiKey) return;
+      const state = imageStates[pageIndex];
+      if (!state) return;
+
+      const page = nonEmptyPages.find((p) => p.pageIndex === pageIndex);
+      if (!page) return;
+
+      setGenerating(true);
+      setProgress({ current: 0, total: 4 });
+      setError(null);
+
+      const scenePrompt =
+        state.customPrompt ||
+        page.sceneAnalysis?.imagePrompt ||
+        page.textBlocks.flat().join(' ');
+
+      let completedCount = 0;
+
+      for (const bgType of ['white', 'full'] as const) {
+        const slotStartIdx = bgType === 'white' ? 0 : 2;
+
+        try {
+          const images = await generateSceneImages(
+            apiKey,
+            scenePrompt,
+            styleDescription,
+            bgType,
+            referenceImageBase64,
+            2,
+          );
+
+          setImageStates((prev) => {
+            const prevState = prev[pageIndex];
+            const newSlots = [...prevState.slots];
+            images.forEach((img, imgIdx) => {
+              const slotIdx = slotStartIdx + imgIdx;
+              if (slotIdx < newSlots.length) {
+                newSlots[slotIdx] = { ...newSlots[slotIdx], image: img };
+              }
+
+              const bytes = base64ToUint8Array(img.base64);
+              postToPlugin({
+                type: 'STORE_SCENE_IMAGE',
+                pageIndex,
+                imageBytes: Array.from(bytes),
+                variant: slotIdx,
+                backgroundType: bgType,
+              });
+            });
+            return {
+              ...prev,
+              [pageIndex]: { ...prevState, slots: newSlots, selectedVariant: null },
+            };
+          });
+        } catch (err: any) {
+          if (err.message !== 'Cancelled') {
+            setError(`Page ${pageIndex + 1} 재생성 오류: ${err.message}`);
+          }
+        }
+
+        completedCount += 2;
+        setProgress({ current: completedCount, total: 4 });
+      }
+
+      setGenerating(false);
+    },
+    [apiKey, imageStates, nonEmptyPages, styleDescription, referenceImageBase64, generateSceneImages],
+  );
 
   // --- Styles ---
   const containerStyle: React.CSSProperties = {
@@ -216,7 +376,19 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     color: '#999',
     textAlign: 'center',
     transition: 'border-color 0.15s',
+    overflow: 'hidden',
+    position: 'relative',
+    padding: 0,
   });
+
+  const errorStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: '#E53E3E',
+    padding: '4px 8px',
+    background: '#FFF3F3',
+    borderRadius: 4,
+    marginBottom: 4,
+  };
 
   const regenRowStyle: React.CSSProperties = {
     display: 'flex',
@@ -244,6 +416,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>Step 7: 이미지 벌크 생성</div>
+
+      {error && <div style={errorStyle}>{error}</div>}
 
       {/* Generation controls */}
       <div style={sectionStyle}>
@@ -281,8 +455,17 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             <div style={progressBarContainerStyle}>
               <div style={progressBarFillStyle} />
             </div>
-            <div style={{ fontSize: 10, color: '#999', textAlign: 'center', marginTop: 4 }}>
-              {progress.current} / {progress.total} 페이지
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              <span style={{ fontSize: 10, color: '#999' }}>
+                {progress.current} / {progress.total} 이미지
+              </span>
+              <button
+                type="button"
+                onClick={handleCancel}
+                style={{ fontSize: 10, color: '#E53E3E', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                취소
+              </button>
             </div>
           </>
         )}
@@ -308,7 +491,33 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                     style={slotStyle(state.selectedVariant === idx)}
                     onClick={() => handleSelectVariant(page.pageIndex, idx)}
                   >
-                    {slot.label}
+                    {slot.image ? (
+                      <>
+                        <img
+                          src={`data:image/png;base64,${slot.image.base64}`}
+                          alt={slot.label}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                        {state.selectedVariant === idx && (
+                          <div style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: 'rgba(24, 160, 251, 0.8)',
+                            color: '#fff',
+                            fontSize: 8,
+                            textAlign: 'center',
+                            padding: '1px 0',
+                            fontWeight: 600,
+                          }}>
+                            선택
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      slot.label
+                    )}
                   </div>
                 ))}
               </div>
@@ -324,8 +533,12 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                 />
                 <button
                   type="button"
-                  style={btnOutlineStyle}
+                  style={{
+                    ...btnOutlineStyle,
+                    ...(generating ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+                  }}
                   onClick={() => handleRegenerate(page.pageIndex)}
+                  disabled={generating}
                 >
                   재생성
                 </button>
@@ -337,7 +550,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
       {/* Note */}
       <div style={noteStyle}>
-        이미지 생성은 Gemini Image API 연동 후 활성화됩니다
+        페이지당 4장 (흰 배경 2장 + 풀 배경 2장)이 생성됩니다
       </div>
     </div>
   );
