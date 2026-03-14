@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { getPageTextPreview } from '../utils/geminiApi';
 import type { ExpressionCard } from '../../shared/messageTypes';
 import type { StoryPage } from '../../shared/pipeline';
 
@@ -30,16 +31,6 @@ function parseExpressions(raw: string): ExpressionCard[] {
       } as ExpressionCard;
     })
     .filter((c): c is ExpressionCard => c !== null);
-}
-
-function getPageTextPreview(page: StoryPage, maxLen = 20): string {
-  const full = page.textBlocks
-    .flat()
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!full) return '(빈 페이지)';
-  return full.length > maxLen ? full.slice(0, maxLen) + '...' : full;
 }
 
 const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({

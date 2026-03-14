@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { callGemini, getPageTextPreview } from '../utils/geminiApi';
 import type { StoryPage, Character, SceneAnalysis } from '../../shared/pipeline';
 
 interface SceneStructurePanelProps {
@@ -10,14 +11,6 @@ interface SceneStructurePanelProps {
 }
 
 type AnalysisStatus = 'idle' | 'analyzing' | 'done';
-
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-function getPageTextPreview(page: StoryPage, maxLen = 30): string {
-  if (page.isEmpty) return '[빈 페이지]';
-  const allText = page.textBlocks.map((b) => b.join(' ')).join(' ');
-  return allText.length > maxLen ? allText.slice(0, maxLen) + '…' : allText;
-}
 
 function buildAllPagesPrompt(pages: StoryPage[], characters: Character[]): string {
   const charList = characters.map((c) => `${c.id}: ${c.name} (${c.personality})`).join('\n');
@@ -59,25 +52,6 @@ ${text}
 JSON 객체만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 }
 
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7 },
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini API error: ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  // Strip markdown code fences if present
-  return text.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-}
-
 const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   pages,
   characters,
@@ -101,7 +75,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
 
     try {
       const prompt = buildAllPagesPrompt(pages, characters);
-      const rawJson = await callGemini(prompt, apiKey);
+      const rawJson = await callGemini(apiKey, prompt);
       const results: Array<{
         pageIndex: number;
         characters: { characterId: string; action: string }[];
@@ -144,7 +118,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       setError(null);
       try {
         const prompt = buildSinglePagePrompt(page, characters);
-        const rawJson = await callGemini(prompt, apiKey);
+        const rawJson = await callGemini(apiKey, prompt);
         const result = JSON.parse(rawJson);
 
         const updated = pages.map((p) => {

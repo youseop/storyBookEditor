@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { getPageTextPreview } from '../utils/geminiApi';
 import type { StoryPage } from '../../shared/pipeline';
 
 interface ImagePlacementPanelProps {
@@ -10,12 +11,6 @@ interface ImagePlacementPanelProps {
 interface PagePlacementState {
   bgType: 'white' | 'full';
   customPrompt: string;
-}
-
-function getPageTextPreview(page: StoryPage, maxLen = 30): string {
-  if (page.isEmpty) return '[빈 페이지]';
-  const allText = page.textBlocks.map((b) => b.join(' ')).join(' ');
-  return allText.length > maxLen ? allText.slice(0, maxLen) + '…' : allText;
 }
 
 const ImagePlacementPanel: React.FC<ImagePlacementPanelProps> = ({

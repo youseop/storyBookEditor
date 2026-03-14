@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { getPageTextPreview } from '../utils/geminiApi';
 import type { StoryPage, Character } from '../../shared/pipeline';
 
 interface ImageBulkGenPanelProps {
@@ -14,12 +15,6 @@ interface PageImageState {
   slots: Array<{ label: string; bgType: 'white' | 'full'; generated: boolean }>;
   selectedVariant: number | null;
   customPrompt: string;
-}
-
-function getPageTextPreview(page: StoryPage, maxLen = 30): string {
-  if (page.isEmpty) return '[빈 페이지]';
-  const allText = page.textBlocks.map((b) => b.join(' ')).join(' ');
-  return allText.length > maxLen ? allText.slice(0, maxLen) + '…' : allText;
 }
 
 function createInitialSlots(): PageImageState['slots'] {

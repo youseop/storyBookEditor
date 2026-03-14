@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
 
 interface KeyColorPanelProps {
@@ -14,6 +14,11 @@ const KeyColorPanel: React.FC<KeyColorPanelProps> = ({
 }) => {
   const [localColorA, setLocalColorA] = useState(colorA);
   const [localColorB, setLocalColorB] = useState(colorB);
+
+  useEffect(() => {
+    setLocalColorA(colorA);
+    setLocalColorB(colorB);
+  }, [colorA, colorB]);
 
   const handleApply = useCallback(() => {
     onColorsChange(localColorA, localColorB);

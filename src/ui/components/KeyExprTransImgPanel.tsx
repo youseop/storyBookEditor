@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { callGemini } from '../utils/geminiApi';
 import type { ExpressionCard } from '../../shared/messageTypes';
 import type { StoryPage } from '../../shared/pipeline';
 
@@ -13,26 +14,6 @@ interface KeyExprTransImgPanelProps {
 
 type TranslateStatus = 'idle' | 'translating' | 'done';
 type ImageGenStatus = 'idle' | 'generating' | 'done';
-
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7 },
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini API error: ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  return text.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-}
 
 const KeyExprTransImgPanel: React.FC<KeyExprTransImgPanelProps> = ({
   pages,
@@ -102,7 +83,7 @@ ${JSON.stringify(input, null, 2)}
 
 JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 
-      const rawJson = await callGemini(prompt, apiKey);
+      const rawJson = await callGemini(apiKey, prompt);
       const results: Array<{
         pageIndex: number;
         expressions: Array<{ id: string; english: string }>;

@@ -1,9 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { callGemini } from '../utils/geminiApi';
 import type { Character } from '../../shared/pipeline';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const TEXT_MODEL = 'gemini-2.5-flash';
 
 interface CharacterPanelProps {
   storyText: string;
@@ -22,6 +20,10 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setLocalCharacters(characters);
+  }, [characters]);
+
   const handleAnalyze = useCallback(async () => {
     if (!storyText.trim()) {
       setError('이야기 텍스트가 없습니다. Step 1에서 입력해주세요.');
@@ -36,34 +38,15 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
     setError(null);
 
     try {
-      const url = `${GEMINI_API_BASE}/${TEXT_MODEL}:generateContent?key=${apiKey}`;
       const prompt = `다음 동화에서 등장하는 인물들을 분석해주세요. JSON 배열로 응답해주세요. 각 인물: {name: string, personality: string, appearance: string}. 이야기에 명시되지 않은 외형은 이야기 분위기에 맞게 적절히 제안해주세요.\n\n${storyText}`;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-          },
-        }),
-      });
+      const result = await callGemini(apiKey, prompt, 'gemini-2.5-flash');
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Gemini API error (${response.status}): ${errorBody}`);
-      }
-
-      const data = await response.json();
-      const candidate = data.candidates?.[0];
-      const textPart = candidate?.content?.parts?.find((p: any) => p.text);
-
-      if (!textPart) {
+      if (!result) {
         throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
       }
 
-      const parsed = JSON.parse(textPart.text);
+      const parsed = JSON.parse(result);
       const charArray = Array.isArray(parsed) ? parsed : parsed.characters || [];
 
       const newCharacters: Character[] = charArray.map((c: any) => ({

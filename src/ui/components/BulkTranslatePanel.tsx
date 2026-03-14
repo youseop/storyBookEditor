@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { postToPlugin } from '../hooks/useFigmaMessages';
+import { callGemini } from '../utils/geminiApi';
 import type { StoryPage } from '../../shared/pipeline';
 
 interface BulkTranslatePanelProps {
@@ -9,26 +9,6 @@ interface BulkTranslatePanelProps {
 }
 
 type TranslateStatus = 'idle' | 'translating' | 'done';
-
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7 },
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini API error: ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  return text.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-}
 
 function getPageKoreanText(page: StoryPage): string {
   return page.textBlocks.map((block) => block.join('\n')).join('\n\n');
@@ -73,7 +53,7 @@ ${JSON.stringify(input, null, 2)}
 
 JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 
-      const rawJson = await callGemini(prompt, apiKey);
+      const rawJson = await callGemini(apiKey, prompt);
       const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(rawJson);
 
       const newTranslations: Record<number, string[][]> = {};
@@ -112,7 +92,7 @@ ${JSON.stringify(input, null, 2)}
 
 JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
 
-        const rawJson = await callGemini(prompt, apiKey);
+        const rawJson = await callGemini(apiKey, prompt);
         const results: Array<{ pageIndex: number; translatedBlocks: string[][] }> = JSON.parse(rawJson);
 
         if (results.length > 0) {
@@ -148,7 +128,7 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
 한국어: ${koreanText}
 영어: ${englishText}`;
 
-        const result = await callGemini(prompt, apiKey);
+        const result = await callGemini(apiKey, prompt);
         setReviewResults((prev) => ({ ...prev, [pageIndex]: result }));
       } catch (err: any) {
         setError(`페이지 ${pageIndex + 1} 검수 오류: ${err.message}`);
@@ -178,17 +158,9 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
     [translations, onTranslationsChange],
   );
 
-  const handleApplyToFigma = useCallback(() => {
-    const translationEntries = Object.entries(translations).map(([pageIdx, blocks]) => ({
-      pageIndex: Number(pageIdx),
-      englishTextBlocks: blocks,
-    }));
-
-    postToPlugin({
-      type: 'CREATE_PART2_PAGES',
-      translations: translationEntries,
-    });
-  }, [translations]);
+  const handleSaveTranslations = useCallback(() => {
+    onTranslationsChange(translations);
+  }, [translations, onTranslationsChange]);
 
   // --- Styles ---
   const containerStyle: React.CSSProperties = {
@@ -453,7 +425,7 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
         })}
       </div>
 
-      {/* Apply to Figma */}
+      {/* Save translations */}
       <button
         type="button"
         style={{
@@ -461,10 +433,10 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
           background: '#1BC47D',
           ...(translatedCount === 0 ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
         }}
-        onClick={handleApplyToFigma}
+        onClick={handleSaveTranslations}
         disabled={translatedCount === 0}
       >
-        Figma에 반영
+        번역 저장
       </button>
 
       <div style={{ fontSize: 10, color: '#999', textAlign: 'center', fontStyle: 'italic' }}>

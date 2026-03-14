@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { getPageTextPreview } from '../utils/geminiApi';
 import type { StoryPage } from '../../shared/pipeline';
 
 type DialogueTemplate = 'plain' | 'border-a' | 'border-b';
@@ -8,12 +9,6 @@ interface DialoguePlacementPanelProps {
   pages: StoryPage[];
   keyColorA: string;
   keyColorB: string;
-}
-
-function getPageTextPreview(page: StoryPage, maxLen = 40): string {
-  if (page.isEmpty) return '[빈 페이지]';
-  const allText = page.textBlocks.map((b) => b.join(' ')).join(' ');
-  return allText.length > maxLen ? allText.slice(0, maxLen) + '…' : allText;
 }
 
 const TEMPLATE_OPTIONS: { value: DialogueTemplate; label: string }[] = [

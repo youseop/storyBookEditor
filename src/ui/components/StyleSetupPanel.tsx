@@ -1,8 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const TEXT_MODEL = 'gemini-2.5-flash';
+import { callGemini } from '../utils/geminiApi';
 
 interface StyleSetupPanelProps {
   storyText: string;
@@ -40,31 +38,15 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
     setError(null);
 
     try {
-      const url = `${GEMINI_API_BASE}/${TEXT_MODEL}:generateContent?key=${apiKey}`;
       const prompt = `다음 동화 이야기를 읽고, 이 이야기에 적합한 일러스트 스타일을 한국어로 3줄 이내로 제안해주세요. 색감, 분위기, 화풍을 포함해서 설명해주세요.\n\n${storyText}`;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      });
+      const result = await callGemini(apiKey, prompt, 'gemini-2.5-flash');
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Gemini API error (${response.status}): ${errorBody}`);
-      }
-
-      const data = await response.json();
-      const candidate = data.candidates?.[0];
-      const textPart = candidate?.content?.parts?.find((p: any) => p.text);
-
-      if (!textPart) {
+      if (!result) {
         throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
       }
 
-      onStyleDescriptionChange(textPart.text.trim());
+      onStyleDescriptionChange(result.trim());
     } catch (err: any) {
       setError(err.message || '스타일 분석 중 오류가 발생했습니다.');
     } finally {
