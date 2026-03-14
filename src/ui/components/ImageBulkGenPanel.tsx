@@ -3,7 +3,7 @@ import { getPageTextPreview } from '../utils/geminiApi';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
 import { base64ToUint8Array } from '../services/geminiService';
 import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
-import type { StoryPage, Character } from '../../shared/pipeline';
+import type { StoryPage, Character, SceneAnalysis } from '../../shared/pipeline';
 import ImageStrip from './ImageStrip';
 import ImageHoverPreview from './ImageHoverPreview';
 
@@ -71,6 +71,7 @@ interface ImageBulkGenPanelProps {
   referenceImageBase64?: string;
   apiKey: string;
   onImageSelect: (pageIndex: number, variant: number) => void;
+  onPagesUpdate: (pages: StoryPage[]) => void;
 }
 
 interface PageImageState {
@@ -86,6 +87,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
   referenceImageBase64,
   apiKey,
   onImageSelect,
+  onPagesUpdate,
 }) => {
   const nonEmptyPages = pages.filter((p) => !p.isEmpty);
 
@@ -266,6 +268,70 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     } else {
       setHoverPreview(null);
     }
+  }, []);
+
+  // --- Scene analysis edit ---
+  const [editingPage, setEditingPage] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<SceneAnalysis | null>(null);
+  const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
+
+  const toggleSceneExpand = useCallback((pageIndex: number) => {
+    setExpandedScenes(prev => {
+      const next = new Set(prev);
+      if (next.has(pageIndex)) next.delete(pageIndex); else next.add(pageIndex);
+      return next;
+    });
+  }, []);
+
+  const handleStartEdit = useCallback((pageIndex: number) => {
+    const page = pages.find(p => p.pageIndex === pageIndex);
+    if (page?.sceneAnalysis) {
+      setEditDraft(JSON.parse(JSON.stringify(page.sceneAnalysis)));
+      setEditingPage(pageIndex);
+      setExpandedScenes(prev => new Set(prev).add(pageIndex));
+    }
+  }, [pages]);
+
+  const handleSaveEdit = useCallback((pageIndex: number) => {
+    if (!editDraft) return;
+    const updated = pages.map(p =>
+      p.pageIndex === pageIndex ? { ...p, sceneAnalysis: editDraft } : p
+    );
+    onPagesUpdate(updated);
+    setEditingPage(null);
+    setEditDraft(null);
+  }, [editDraft, pages, onPagesUpdate]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingPage(null);
+    setEditDraft(null);
+  }, []);
+
+  const updateDraftField = useCallback((path: string, value: string) => {
+    setEditDraft(prev => {
+      if (!prev) return prev;
+      const draft = { ...prev };
+      if (path.startsWith('background.')) {
+        const key = path.split('.')[1] as keyof SceneAnalysis['background'];
+        draft.background = { ...draft.background, [key]: value };
+      } else if (path === 'imageSceneDescription') {
+        draft.imageSceneDescription = value;
+      } else if (path === 'sceneDescription') {
+        draft.sceneDescription = value;
+      } else if (path === 'characterNames') {
+        draft.characterNames = value.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return draft;
+    });
+  }, []);
+
+  const updateDraftAction = useCallback((charName: string, field: string, value: string) => {
+    setEditDraft(prev => {
+      if (!prev) return prev;
+      const actions = { ...prev.characterActions };
+      actions[charName] = { ...actions[charName], [field]: value };
+      return { ...prev, characterActions: actions };
+    });
   }, []);
 
   const handleSelectImage = useCallback(
@@ -569,6 +635,141 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                 <span style={pageNumStyle}>Page {page.pageIndex + 1}</span>
               </div>
               <div style={textPreviewStyle}>{getPageTextPreview(page)}</div>
+
+              {/* Scene analysis info */}
+              {page.sceneAnalysis && editingPage !== page.pageIndex && (
+                <div style={{ marginBottom: 8, padding: 8, background: '#F8F9FA', borderRadius: 4, fontSize: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleSceneExpand(page.pageIndex)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10, fontWeight: 600, color: '#555' }}
+                    >
+                      {expandedScenes.has(page.pageIndex) ? '▾' : '▸'} 장면 정보
+                    </button>
+                    <button
+                      type="button"
+                      style={{ fontSize: 9, padding: '2px 6px', background: '#fff', border: '1px solid #CCC', borderRadius: 3, cursor: 'pointer', color: '#555' }}
+                      onClick={() => handleStartEdit(page.pageIndex)}
+                    >
+                      편집
+                    </button>
+                  </div>
+                  {/* Compact always-visible summary */}
+                  <div style={{ color: '#666', lineHeight: 1.5 }}>
+                    <div>
+                      <span style={{ color: '#8B5CF6' }}>{page.sceneAnalysis.background.setting}</span>
+                      {' · '}
+                      <span style={{ color: '#059669' }}>{page.sceneAnalysis.characterNames.join(', ')}</span>
+                    </div>
+                  </div>
+                  {/* Expanded details */}
+                  {expandedScenes.has(page.pageIndex) && (
+                    <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #E5E5E5', lineHeight: 1.5, color: '#666' }}>
+                      <div style={{ marginBottom: 2 }}>
+                        <span style={{ fontWeight: 600 }}>배경:</span> {page.sceneAnalysis.background.setting} · {page.sceneAnalysis.background.time} · {page.sceneAnalysis.background.mood}
+                        {page.sceneAnalysis.background.details && <span style={{ color: '#888' }}> · {page.sceneAnalysis.background.details}</span>}
+                      </div>
+                      {Object.entries(page.sceneAnalysis.characterActions).map(([name, info]) => (
+                        <div key={name} style={{ marginBottom: 1 }}>
+                          <span style={{ fontWeight: 600 }}>{name}:</span> {info.action} ({info.expression}) — {info.position}
+                        </div>
+                      ))}
+                      <div style={{ color: '#333', marginTop: 2 }}>{page.sceneAnalysis.sceneDescription}</div>
+                      <div style={{ color: '#18A0FB', fontStyle: 'italic', marginTop: 2 }}>{page.sceneAnalysis.imageSceneDescription}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!page.sceneAnalysis && (
+                <div style={{ marginBottom: 8, padding: 6, background: '#FFF8E1', borderRadius: 4, fontSize: 10, color: '#B8860B' }}>
+                  장면 분석 없음 — Step 6에서 먼저 분석을 실행해주세요
+                </div>
+              )}
+
+              {/* Scene analysis edit mode */}
+              {editingPage === page.pageIndex && editDraft && (
+                <div style={{ marginBottom: 8, padding: 10, background: '#FFF8E1', borderRadius: 6, border: '1px solid #FFE082', fontSize: 10 }}>
+                  <div style={{ fontWeight: 700, color: '#333', marginBottom: 8, fontSize: 11 }}>장면 정보 편집</div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>장면 설명 (한국어)</div>
+                    <textarea
+                      value={editDraft.sceneDescription}
+                      onChange={(e) => updateDraftField('sceneDescription', e.target.value)}
+                      style={{ width: '100%', minHeight: 36, padding: 4, border: '1px solid #DDD', borderRadius: 3, fontSize: 10, resize: 'vertical', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>이미지 프롬프트 (영어, 이미지 생성에 직접 사용)</div>
+                    <textarea
+                      value={editDraft.imageSceneDescription}
+                      onChange={(e) => updateDraftField('imageSceneDescription', e.target.value)}
+                      style={{ width: '100%', minHeight: 48, padding: 4, border: '1px solid #18A0FB', borderRadius: 3, fontSize: 10, resize: 'vertical', boxSizing: 'border-box', background: '#F0F8FF' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <div style={{ flex: 2 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>배경 (setting)</div>
+                      <input value={editDraft.background.setting} onChange={(e) => updateDraftField('background.setting', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>시간 (time)</div>
+                      <input value={editDraft.background.time} onChange={(e) => updateDraftField('background.time', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>분위기 (mood)</div>
+                      <input value={editDraft.background.mood} onChange={(e) => updateDraftField('background.mood', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>배경 세부 (details)</div>
+                    <input value={editDraft.background.details} onChange={(e) => updateDraftField('background.details', e.target.value)}
+                      style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>등장인물 (쉼표로 구분)</div>
+                    <input value={editDraft.characterNames.join(', ')} onChange={(e) => updateDraftField('characterNames', e.target.value)}
+                      style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                  </div>
+
+                  {/* Character actions */}
+                  {editDraft.characterNames.map((name) => {
+                    const action = editDraft.characterActions[name] || { action: '', expression: '', position: '' };
+                    return (
+                      <div key={name} style={{ marginBottom: 4, padding: 4, background: '#fff', borderRadius: 3, border: '1px solid #EEE' }}>
+                        <div style={{ fontWeight: 600, color: '#059669', marginBottom: 2 }}>{name}</div>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input placeholder="action" value={action.action} onChange={(e) => updateDraftAction(name, 'action', e.target.value)}
+                            style={{ flex: 2, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                          <input placeholder="expression" value={action.expression} onChange={(e) => updateDraftAction(name, 'expression', e.target.value)}
+                            style={{ flex: 1, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                          <input placeholder="position" value={action.position} onChange={(e) => updateDraftAction(name, 'position', e.target.value)}
+                            style={{ flex: 1, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button type="button" onClick={() => handleSaveEdit(page.pageIndex)}
+                      style={{ flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 700, color: '#fff', background: '#18A0FB', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                      저장
+                    </button>
+                    <button type="button" onClick={handleCancelEdit}
+                      style={{ flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 600, color: '#666', background: '#fff', border: '1px solid #DDD', borderRadius: 4, cursor: 'pointer' }}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Image strip */}
               {state.images.length > 0 ? (

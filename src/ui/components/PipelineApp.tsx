@@ -426,6 +426,7 @@ const PipelineApp: React.FC = () => {
                 ),
               }));
             }}
+            onPagesUpdate={(pages) => setPipelineState(prev => ({ ...prev, pages }))}
           />
         );
       case Step.IMAGE_PLACEMENT:
