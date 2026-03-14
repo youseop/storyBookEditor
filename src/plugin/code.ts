@@ -115,7 +115,7 @@ function autoAssignStoredImages(mainFrame: FrameNode): void {
     var hash = rects[i].getPluginData('imageHash');
     var idx = parseInt(rects[i].getPluginData('imageIndex') || '0', 10);
     if (exprId && hash) {
-      var indexMap = storedMap.get(exprId) || new Map<number, string>();
+      var indexMap: Map<number, string> | undefined = storedMap.get(exprId) || new Map<number, string>();
       indexMap.set(idx, hash);
       storedMap.set(exprId, indexMap);
     }
@@ -150,7 +150,7 @@ function autoAssignStoredImages(mainFrame: FrameNode): void {
     );
     if (existingImg) continue;
 
-    var indexMap = storedMap.get(cardExprId);
+    indexMap = storedMap.get(cardExprId);
     var lookupExprId = cardExprId;
 
     // Fallback: if no stored images by expressionId, match by Korean text content
