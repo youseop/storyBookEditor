@@ -115,6 +115,16 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                 variant,
                 backgroundType: bgType,
               });
+
+              // Also save to gallery
+              postToPlugin({
+                type: 'SAVE_TO_GALLERY',
+                category: 'scene',
+                imageId: img.id,
+                imageBytes: Array.from(bytes),
+                label: `P${page.pageIndex + 1} ${bgType === 'white' ? '흰배경' : '풀배경'} #${imgIdx + 1}`,
+                metadata: JSON.stringify({ pageIndex: page.pageIndex, variant, bgType }),
+              });
             });
           } catch (err: any) {
             if (err.message === 'Cancelled') break;
@@ -241,6 +251,16 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
               imageBytes: Array.from(bytes),
               variant,
               backgroundType: bgType,
+            });
+
+            // Also save to gallery
+            postToPlugin({
+              type: 'SAVE_TO_GALLERY',
+              category: 'scene',
+              imageId: img.id,
+              imageBytes: Array.from(bytes),
+              label: `P${pageIndex + 1} ${bgType === 'white' ? '흰배경' : '풀배경'} #${imgIdx + 1}`,
+              metadata: JSON.stringify({ pageIndex, variant, bgType }),
             });
           });
         } catch (err: any) {

@@ -490,7 +490,7 @@ export interface StepStatusDetectedMessage {
   type: 'STEP_STATUS_DETECTED';
   detectedSteps: number[];
   details: Record<number, string>;
-  snapshotInfo: Array<{ slot: number; label: string; timestamp: string }>;
+  snapshotInfo: Array<{ slot: number; label: string; timestamp: string; hasState?: boolean }>;
 }
 
 export interface GalleryLoadedMessage {

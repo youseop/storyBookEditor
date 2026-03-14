@@ -29,6 +29,7 @@ import LogViewer from './LogViewer';
 const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
   const [isLoading, setIsLoading] = useState(true);
+  const stateLoadedRef = useRef(false);
 
   // Translations for Part 2 (pageIndex -> translated text blocks)
   const [translations, setTranslations] = useState<Record<number, string[][]>>({});
@@ -56,9 +57,11 @@ const PipelineApp: React.FC = () => {
   // Load pipeline state from Figma on startup
   useEffect(() => {
     postToPlugin({ type: 'LOAD_PIPELINE_STATE' });
+    postToPlugin({ type: 'LOAD_GALLERY' });
     // If no state is loaded within 1s, assume new project
     const timer = setTimeout(() => {
       setIsLoading(false);
+      stateLoadedRef.current = true;
       postToPlugin({ type: 'DETECT_STEP_STATUS' });
     }, 1000);
     return () => clearTimeout(timer);
@@ -90,6 +93,7 @@ const PipelineApp: React.FC = () => {
             completedSteps: msg.state.completedSteps,
           });
         }
+        stateLoadedRef.current = true;
         setIsLoading(false);
         // Auto-detect canvas state
         postToPlugin({ type: 'DETECT_STEP_STATUS' });
@@ -145,15 +149,27 @@ const PipelineApp: React.FC = () => {
     };
   }, [translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements, keyExprFrameIds, keyExprEnLinesMaps]);
 
+  // Debounced auto-save timer ref (declared early for use in cancelPendingSave)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancel any pending debounced save to prevent double-save after immediate save
+  const cancelPendingSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }, []);
+
   // Navigation
   const handleStepChange = useCallback((step: Step) => {
     setPipelineState(prev => {
       const next = { ...prev, currentStep: step };
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
+      cancelPendingSave();
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas, buildFullState]);
+  }, [updateProgressOnCanvas, buildFullState, cancelPendingSave]);
 
   const handleNextStep = useCallback(() => {
     setPipelineState(prev => {
@@ -168,21 +184,27 @@ const PipelineApp: React.FC = () => {
         completedSteps,
       };
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
+      cancelPendingSave();
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas, buildFullState]);
+  }, [updateProgressOnCanvas, buildFullState, cancelPendingSave]);
 
   const handlePrevStep = useCallback(() => {
     setPipelineState(prev => {
       const prevStepNum = prev.currentStep - 1;
       if (prevStepNum < 1) return prev;
-      const next = { ...prev, currentStep: prevStepNum as Step };
+      const next = {
+        ...prev,
+        currentStep: prevStepNum as Step,
+        completedSteps: prev.completedSteps.filter(s => s < prevStepNum),
+      };
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
+      cancelPendingSave();
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas, buildFullState]);
+  }, [updateProgressOnCanvas, buildFullState, cancelPendingSave]);
 
   const handleSaveSnapshot = useCallback(() => {
     const label = `수동 저장 (Step ${pipelineState.currentStep})`;
@@ -270,18 +292,22 @@ const PipelineApp: React.FC = () => {
   }, []);
 
   // Auto-save pipeline state when data changes (debounced)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !stateLoadedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const fullState = buildFullState(pipelineState);
+      const stateJson = JSON.stringify(fullState);
+      if (stateJson.length > 900000) {
+        console.warn(`[Pipeline] State size ${(stateJson.length / 1024).toFixed(0)}KB approaching 1MB limit`);
+      }
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: fullState });
     }, 1000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [
     pipelineState.storyTitle, pipelineState.storyText, pipelineState.characters,
     pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages,
+    pipelineState.currentStep, pipelineState.completedSteps,
     translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements,
     keyExprFrameIds, keyExprEnLinesMaps,
     isLoading, buildFullState,

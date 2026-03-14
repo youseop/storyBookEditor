@@ -382,6 +382,15 @@ async function createSnapshot(
   snapshotFrame.setPluginData(PLUGIN_DATA_KEYS.snapshotTimestamp, timestamp);
   snapshotFrame.setPluginData(PLUGIN_DATA_KEYS.nodeType, 'snapshot');
 
+  // Save pipeline state JSON for potential restoration
+  const pipelineDataNode = findPipelineDataNode();
+  if (pipelineDataNode) {
+    const stateJson = pipelineDataNode.getPluginData(PLUGIN_DATA_KEYS.pipelineState);
+    if (stateJson) {
+      snapshotFrame.setPluginData('pk-snapshot-state', stateJson);
+    }
+  }
+
   // Add label text
   const labelText = figma.createText();
   labelText.fontName = { family: 'Inter', style: 'Regular' };
@@ -392,12 +401,14 @@ async function createSnapshot(
   labelText.y = 50;
   snapshotFrame.appendChild(labelText);
 
-  // Clone all Part frames into snapshot
+  // Clone all PK-* frames into snapshot (excludes data nodes, snapshots, and gallery)
   const partFrames = figma.currentPage.children.filter(
     (n) =>
-      n.name.startsWith('PK-Part') &&
+      n.name.startsWith('PK-') &&
       n.type === 'FRAME' &&
-      !n.name.startsWith('PK-Snapshot')
+      !n.name.startsWith('PK-Snapshot') &&
+      !n.name.startsWith('PK-Pipeline') &&
+      !n.name.startsWith('PK-Image-Gallery')
   ) as FrameNode[];
 
   let cloneX = 50;
@@ -2795,13 +2806,14 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         // Save gallery index to pluginData
         const dataNode = getOrCreatePipelineDataNode();
         const galleryDataRaw = dataNode.getPluginData(PLUGIN_DATA_KEYS.imageGalleryData) || '[]';
-        const galleryData = JSON.parse(galleryDataRaw) as Array<{ category: string; imageId: string; label: string; imageHash: string; metadata?: string }>;
+        const galleryData = JSON.parse(galleryDataRaw) as Array<{ category: string; imageId: string; label: string; imageHash: string; metadata?: string; timestamp?: string }>;
         galleryData.push({
           category: msg.category,
           imageId: msg.imageId,
           label: msg.label,
           imageHash: image.hash,
           metadata: msg.metadata,
+          timestamp: new Date().toISOString(),
         });
         dataNode.setPluginData(PLUGIN_DATA_KEYS.imageGalleryData, JSON.stringify(galleryData));
 
@@ -2969,16 +2981,18 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         }
 
         // Get snapshot info
-        const snapshotInfo: Array<{ slot: number; label: string; timestamp: string }> = [];
+        const snapshotInfo: Array<{ slot: number; label: string; timestamp: string; hasState?: boolean }> = [];
         for (let slot = 1; slot <= 2; slot++) {
           const snapFrame = figma.currentPage.findOne(
             n => n.name === FRAME_NAMES.snapshotSlot(slot)
           ) as FrameNode | null;
           if (snapFrame) {
+            const hasState = !!snapFrame.getPluginData('pk-snapshot-state');
             snapshotInfo.push({
               slot,
               label: snapFrame.getPluginData(PLUGIN_DATA_KEYS.snapshotLabel) || `Slot ${slot}`,
               timestamp: snapFrame.getPluginData(PLUGIN_DATA_KEYS.snapshotTimestamp) || '',
+              hasState,
             });
           }
         }
