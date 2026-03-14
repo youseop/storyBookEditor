@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { postToPlugin } from '../hooks/useFigmaMessages';
+import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
+import type { SandboxToUIMessage } from '../../shared/messageTypes';
 import type { StoryPage } from '../../shared/pipeline';
 
 interface FinalOutputPanelProps {
@@ -18,26 +19,35 @@ const FinalOutputPanel: React.FC<FinalOutputPanelProps> = ({
   const [isComplete, setIsComplete] = useState(false);
   const [pageNumbersInserted, setPageNumbersInserted] = useState(false);
 
+  // Listen for plugin responses
+  usePluginMessage(useCallback((msg: SandboxToUIMessage) => {
+    switch (msg.type) {
+      case 'PAGE_NUMBERS_INSERTED':
+        setPageNumbersInserted(true);
+        break;
+      case 'FINAL_OUTPUT_GENERATED':
+        setIsGenerating(false);
+        setIsComplete(true);
+        break;
+    }
+  }, []));
+
   const handleInsertPageNumbers = useCallback(() => {
     postToPlugin({
       type: 'INSERT_PAGE_NUMBERS',
       brandText,
-    } as any);
-    setPageNumbersInserted(true);
+    });
   }, [brandText]);
 
   const handleGenerateFinalOutput = useCallback(() => {
     setIsGenerating(true);
+    const outputType: 'spread' | 'individual' | 'both' =
+      spreadView && individualView ? 'both' :
+      spreadView ? 'spread' : 'individual';
     postToPlugin({
       type: 'GENERATE_FINAL_OUTPUT',
-      spreadView,
-      individualView,
-    } as any);
-    // Simulate completion for now
-    setTimeout(() => {
-      setIsGenerating(false);
-      setIsComplete(true);
-    }, 1500);
+      outputType,
+    });
   }, [spreadView, individualView]);
 
   const handleComplete = useCallback(() => {

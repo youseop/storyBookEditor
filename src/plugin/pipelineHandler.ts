@@ -105,8 +105,6 @@ function removeExistingStoryPages(): void {
  */
 async function createStoryPages(pages: StoryPageInput[]): Promise<string[]> {
   // Load fonts needed for text
-  await figma.loadFontAsync({ family: DEFAULT_FONT_FAMILY, style: 'Regular' });
-  // Fallback if NanumSquareRound not available
   let fontFamily = DEFAULT_FONT_FAMILY;
   try {
     await figma.loadFontAsync({ family: fontFamily, style: 'Regular' });
@@ -151,9 +149,7 @@ async function createStoryPages(pages: StoryPageInput[]): Promise<string[]> {
       frame.appendChild(label);
     } else {
       // Place text blocks
-      let currentY = (STORY_PAGE_HEIGHT - calculateTextBlocksHeight(page.textBlocks)) / 2;
-      // Ensure minimum top padding
-      if (currentY < 90) currentY = 90;
+      let currentY = 200; // Fixed top margin
 
       for (let blockIdx = 0; blockIdx < page.textBlocks.length; blockIdx++) {
         const block = page.textBlocks[blockIdx];
@@ -660,10 +656,6 @@ async function createPart3Layout(colorA: string): Promise<number> {
     contentClone.name = `part1-content-${i}`;
     // Scale to fit in the image area (60% of page height)
     const scaleFactor = imageAreaHeight / STORY_PAGE_HEIGHT;
-    contentClone.resize(
-      STORY_PAGE_WIDTH,
-      imageAreaHeight
-    );
     contentClone.rescale(scaleFactor);
     contentClone.x = Math.round(
       (STORY_PAGE_WIDTH - contentClone.width) / 2
@@ -1155,7 +1147,13 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
         // Get text blocks from page data
         const textBlocksRaw = frame.getPluginData(PLUGIN_DATA_KEYS.textBlocks);
-        if (!textBlocksRaw) break;
+        if (!textBlocksRaw) {
+          figma.ui.postMessage({
+            type: 'ERROR',
+            message: `No text blocks found for page ${msg.pageIndex}`,
+          });
+          return true;
+        }
         const textBlocks = JSON.parse(textBlocksRaw) as string[][];
 
         // Remove existing dialogue nodes
@@ -1181,9 +1179,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           const dialogueWidth = STORY_PAGE_WIDTH * 0.8;
 
           if (template === 'border-a' || template === 'border-b') {
-            const borderColor = template === 'border-a'
-              ? hexToFigmaColor(msg.template === 'border-a' ? '#FFCF66' : '#FFF69B')
-              : hexToFigmaColor('#FFF69B');
+            const borderColor = hexToFigmaColor(template === 'border-a' ? '#FFCF66' : '#FFF69B');
             dialogueGroup.strokes = [{ type: 'SOLID', color: borderColor }];
             dialogueGroup.strokeWeight = 8;
             dialogueGroup.cornerRadius = 24;
@@ -1226,6 +1222,12 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
     case 'STORE_SCENE_IMAGE':
     case 'SELECT_SCENE_IMAGE': {
       // Image storage/selection - will be fully implemented with Gemini Image API
+      console.log(`Pipeline message received but not yet implemented: ${msg.type}`);
+      return true;
+    }
+
+    case 'APPLY_KEY_EXPRESSIONS': {
+      // Key expressions application - will be fully implemented
       console.log(`Pipeline message received but not yet implemented: ${msg.type}`);
       return true;
     }

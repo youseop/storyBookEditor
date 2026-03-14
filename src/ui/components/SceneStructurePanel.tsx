@@ -111,7 +111,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       }> = JSON.parse(rawJson);
 
       const updated = pages.map((page) => {
-        const result = results.find((r) => r.pageIndex === page.pageIndex + 1 || r.pageIndex === page.pageIndex);
+        const result = results.find((r) => r.pageIndex === page.pageIndex + 1);
         if (result && !page.isEmpty) {
           return {
             ...page,
@@ -202,16 +202,12 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   );
 
   const handleApplyToFigma = useCallback(() => {
-    pages.forEach((page) => {
-      if (page.sceneAnalysis) {
-        postToPlugin({
-          type: 'UPDATE_STORY_PAGES',
-          pages: pages.map((p) => ({
-            textBlocks: p.textBlocks,
-            isEmpty: p.isEmpty,
-          })),
-        });
-      }
+    postToPlugin({
+      type: 'UPDATE_STORY_PAGES',
+      pages: pages.map((p) => ({
+        textBlocks: p.textBlocks,
+        isEmpty: p.isEmpty,
+      })),
     });
   }, [pages]);
 

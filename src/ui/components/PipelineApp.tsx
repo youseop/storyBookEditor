@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Step, Phase, PipelineState, createInitialPipelineState, getPhaseForStep, STEP_INFO } from '../../shared/pipeline';
 import type { SandboxToUIMessage } from '../../shared/messageTypes';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
@@ -59,6 +59,9 @@ const PipelineApp: React.FC = () => {
         break;
       case 'SNAPSHOT_CREATED':
         console.log(`Snapshot created: ${msg.label} in slot ${msg.slot}`);
+        break;
+      case 'API_KEY_LOADED':
+        setApiKey(msg.apiKey);
         break;
     }
   }, []));
@@ -180,11 +183,17 @@ const PipelineApp: React.FC = () => {
   useEffect(() => {
     postToPlugin({ type: 'LOAD_API_KEY' });
   }, []);
-  usePluginMessage(useCallback((msg: SandboxToUIMessage) => {
-    if (msg.type === 'API_KEY_LOADED') {
-      setApiKey(msg.apiKey);
-    }
-  }, []));
+
+  // Auto-save pipeline state when data changes (debounced)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: pipelineState });
+    }, 1000);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [pipelineState.storyText, pipelineState.characters, pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages, isLoading]);
 
   // Render the appropriate panel for current step
   const renderStepPanel = () => {
@@ -508,39 +517,5 @@ const PipelineApp: React.FC = () => {
     </div>
   );
 };
-
-// Placeholder for unimplemented steps
-interface PlaceholderPanelProps {
-  stepInfo: { title: string; titleKo: string; description: string };
-  message?: string;
-}
-
-const PlaceholderPanel: React.FC<PlaceholderPanelProps> = ({ stepInfo, message }) => (
-  <div style={{
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '40px 20px',
-    textAlign: 'center',
-    color: '#999',
-  }}>
-    <div style={{ fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 4 }}>
-      {stepInfo.titleKo}
-    </div>
-    <div style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
-      {stepInfo.description}
-    </div>
-    <div style={{
-      padding: '12px 20px',
-      backgroundColor: '#F5F5F5',
-      borderRadius: 8,
-      fontSize: 11,
-      color: '#AAA',
-    }}>
-      {message || '구현 예정'}
-    </div>
-  </div>
-);
 
 export default PipelineApp;
