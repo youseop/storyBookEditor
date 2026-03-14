@@ -78,6 +78,7 @@ interface PageImageState {
   images: GeneratedImage[];
   selectedImageId: string | null;
   customPrompt: string;
+  variantMap: Record<string, number>; // imageId → Figma variant number
 }
 
 const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
@@ -98,6 +99,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         images: [],
         selectedImageId: null,
         customPrompt: '',
+        variantMap: {},
       };
     });
     return init;
@@ -148,6 +150,13 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           const existingIds = new Set(existing.map((e) => e.id));
           const newImages = loadedImages.filter((li) => !existingIds.has(li.id));
 
+          // Build variant map from loaded images
+          const prevVariantMap = next[pageData.pageIndex]?.variantMap || {};
+          const loadedVariantMap: Record<string, number> = {};
+          pageData.images.forEach((img) => {
+            loadedVariantMap[`figma_${pageData.pageIndex}_${img.variant}`] = img.variant;
+          });
+
           const selectedId = pageData.selectedVariant !== undefined
             ? `figma_${pageData.pageIndex}_${pageData.selectedVariant}`
             : next[pageData.pageIndex]?.selectedImageId || null;
@@ -156,6 +165,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             images: [...existing, ...newImages],
             selectedImageId: selectedId,
             customPrompt: next[pageData.pageIndex]?.customPrompt || '',
+            variantMap: { ...prevVariantMap, ...loadedVariantMap },
           };
         }
         return next;
@@ -181,6 +191,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let completedCount = 0;
 
       for (const page of pagesToGen) {
+        let firstImageId: string | null = null;
+
         for (const bgType of ['white', 'full'] as const) {
           const scenePrompt = buildImagePrompt(page, characters, bgType);
           try {
@@ -196,18 +208,23 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             images.forEach((img, imgIdx) => {
               const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
 
-              // Append to images list
+              // Track first generated image for auto-selection
+              if (variant === 0) firstImageId = img.id;
+
+              // Prepend to images list + track variant mapping
               setImageStates((prev) => {
                 const prevState = prev[page.pageIndex] || {
                   images: [],
                   selectedImageId: null,
                   customPrompt: '',
+                  variantMap: {},
                 };
                 return {
                   ...prev,
                   [page.pageIndex]: {
                     ...prevState,
                     images: [img, ...prevState.images],
+                    variantMap: { ...prevState.variantMap, [img.id]: variant },
                   },
                 };
               });
@@ -240,11 +257,29 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           completedCount += 2;
           setProgress({ current: completedCount, total: totalImages });
         }
+
+        // Auto-select first generated image and place on page
+        if (firstImageId) {
+          const autoId = firstImageId;
+          postToPlugin({
+            type: 'SELECT_SCENE_IMAGE',
+            pageIndex: page.pageIndex,
+            variant: 0,
+          });
+          onImageSelect(page.pageIndex, 0);
+          setImageStates((prev) => ({
+            ...prev,
+            [page.pageIndex]: {
+              ...prev[page.pageIndex],
+              selectedImageId: autoId,
+            },
+          }));
+        }
       }
 
       setGenerating(false);
     },
-    [apiKey, styleDescription, referenceImageBase64, generateSceneImages],
+    [apiKey, characters, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
   );
 
   const handleGenerateFirst4 = useCallback(async () => {
@@ -338,14 +373,15 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     (pageIndex: number, imageId: string) => {
       setImageStates((prev) => {
         const state = prev[pageIndex];
-        const imgIndex = state?.images.findIndex((img) => img.id === imageId) ?? 0;
+        const variant = state?.variantMap[imageId];
+        if (variant === undefined) return prev;
 
         postToPlugin({
           type: 'SELECT_SCENE_IMAGE',
           pageIndex,
-          variant: imgIndex,
+          variant,
         });
-        onImageSelect(pageIndex, imgIndex);
+        onImageSelect(pageIndex, variant);
 
         return {
           ...prev,
@@ -383,6 +419,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       setError(null);
 
       let completedCount = 0;
+      let firstImageId: string | null = null;
 
       for (const bgType of ['white', 'full'] as const) {
         const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, bgType);
@@ -399,6 +436,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
           images.forEach((img, imgIdx) => {
             const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
 
+            if (variant === 0) firstImageId = img.id;
+
             setImageStates((prev) => {
               const prevState = prev[pageIndex];
               return {
@@ -407,6 +446,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
                   ...prevState,
                   images: [img, ...prevState.images],
                   selectedImageId: null,
+                  variantMap: { ...prevState.variantMap, [img.id]: variant },
                 },
               };
             });
@@ -440,9 +480,27 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         setProgress({ current: completedCount, total: 4 });
       }
 
+      // Auto-select first regenerated image
+      if (firstImageId) {
+        const autoId = firstImageId;
+        postToPlugin({
+          type: 'SELECT_SCENE_IMAGE',
+          pageIndex,
+          variant: 0,
+        });
+        onImageSelect(pageIndex, 0);
+        setImageStates((prev) => ({
+          ...prev,
+          [pageIndex]: {
+            ...prev[pageIndex],
+            selectedImageId: autoId,
+          },
+        }));
+      }
+
       setGenerating(false);
     },
-    [apiKey, imageStates, nonEmptyPages, styleDescription, referenceImageBase64, generateSceneImages],
+    [apiKey, imageStates, nonEmptyPages, characters, styleDescription, referenceImageBase64, generateSceneImages, onImageSelect],
   );
 
   // --- Styles ---
