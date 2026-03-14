@@ -195,16 +195,6 @@ async function createStoryPages(pages: StoryPageInput[]): Promise<string[]> {
 }
 
 /**
- * Calculate total height of text blocks for vertical centering.
- */
-function calculateTextBlocksHeight(textBlocks: string[][]): number {
-  const blockCount = textBlocks.length;
-  if (blockCount === 0) return 0;
-  // Estimate: each block is TEMP_TEXT_BOX_HEIGHT, with gaps between them
-  return blockCount * TEMP_TEXT_BOX_HEIGHT + (blockCount - 1) * TEMP_TEXT_BOX_GAP;
-}
-
-/**
  * Update existing story pages (re-create changed ones).
  * For simplicity, we re-create all pages. Optimization can come later.
  */
