@@ -62,7 +62,6 @@ const CharacterPanel: React.FC<CharacterPanelProps> = ({
       isInitialMountObjects.current = false;
       return;
     }
-    if (localKeyObjects.length === 0) return;
 
     const timer = setTimeout(() => {
       onKeyObjectsChange(localKeyObjects);

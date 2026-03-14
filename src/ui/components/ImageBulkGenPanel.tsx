@@ -121,6 +121,21 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
     return init;
   });
 
+  // Sync imageStates when pages change (e.g. new pages added in Step 5)
+  useEffect(() => {
+    setImageStates((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const p of nonEmptyPages) {
+        if (!next[p.pageIndex]) {
+          next[p.pageIndex] = { images: [], selectedImageId: null, variantMap: {} };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nonEmptyPages]);
+
   const [generating, setGenerating] = useState(false);
   const [regeneratingPages, setRegeneratingPages] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState({ current: 0, total: 0 });
