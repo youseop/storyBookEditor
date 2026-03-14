@@ -166,26 +166,27 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
   const handleSelectImage = useCallback(
     (pageIndex: number, imageId: string) => {
-      setImageStates((prev) => ({
-        ...prev,
-        [pageIndex]: {
-          ...prev[pageIndex],
-          selectedImageId: imageId,
-        },
-      }));
+      setImageStates((prev) => {
+        const state = prev[pageIndex];
+        const imgIndex = state?.images.findIndex((img) => img.id === imageId) ?? 0;
 
-      // Find variant index for the image
-      const state = imageStates[pageIndex];
-      const imgIndex = state?.images.findIndex((img) => img.id === imageId) ?? 0;
+        postToPlugin({
+          type: 'SELECT_SCENE_IMAGE',
+          pageIndex,
+          variant: imgIndex,
+        });
+        onImageSelect(pageIndex, imgIndex);
 
-      postToPlugin({
-        type: 'SELECT_SCENE_IMAGE',
-        pageIndex,
-        variant: imgIndex,
+        return {
+          ...prev,
+          [pageIndex]: {
+            ...prev[pageIndex],
+            selectedImageId: imageId,
+          },
+        };
       });
-      onImageSelect(pageIndex, imgIndex);
     },
-    [onImageSelect, imageStates],
+    [onImageSelect],
   );
 
   const handleCustomPromptChange = useCallback((pageIndex: number, prompt: string) => {

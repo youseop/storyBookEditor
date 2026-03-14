@@ -2872,21 +2872,29 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         const charFrame = allNodes.find(n => n.name === FRAME_NAMES.metaCharacters);
         if (charFrame) {
           detectedSteps.push(3);
-          const charData = dataNode?.getPluginData(PLUGIN_DATA_KEYS.characterData);
-          const charCount = charData ? JSON.parse(charData).length : 0;
-          details[3] = `${charCount}명 등록됨`;
+          try {
+            const charData = dataNode?.getPluginData(PLUGIN_DATA_KEYS.characterData);
+            const charCount = charData ? JSON.parse(charData).length : 0;
+            details[3] = `${charCount}명 등록됨`;
+          } catch {
+            details[3] = '인물 프레임 있음';
+          }
         }
 
         // Step 4: Character Images
         if (dataNode) {
-          const charImages = dataNode.getPluginData('pk-character-images');
-          if (charImages && charImages !== '{}') {
-            const imgMap = JSON.parse(charImages);
-            const imgCount = Object.keys(imgMap).length;
-            if (imgCount > 0) {
-              detectedSteps.push(4);
-              details[4] = `${imgCount}명 이미지 선택됨`;
+          try {
+            const charImages = dataNode.getPluginData('pk-character-images');
+            if (charImages && charImages !== '{}') {
+              const imgMap = JSON.parse(charImages);
+              const imgCount = Object.keys(imgMap).length;
+              if (imgCount > 0) {
+                detectedSteps.push(4);
+                details[4] = `${imgCount}명 이미지 선택됨`;
+              }
             }
+          } catch {
+            // Corrupted data, skip
           }
         }
 
