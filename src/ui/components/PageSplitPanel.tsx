@@ -8,11 +8,19 @@ export interface ParsedPage {
   isEmpty: boolean;
 }
 
+interface SceneHint {
+  sceneHint: string;
+  characters: string[];
+  location: string;
+}
+
 interface PageSplitPanelProps {
   initialText: string;
   onTextChange: (text: string) => void;
   onPagesChange: (pages: ParsedPage[]) => void;
   apiKey: string;
+  characters?: Array<{ id: string; name: string; personality: string; appearance: string }>;
+  storyTitle?: string;
 }
 
 /**
@@ -40,6 +48,8 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
   onTextChange,
   onPagesChange,
   apiKey,
+  characters = [],
+  storyTitle = '',
 }) => {
   const [text, setText] = useState(initialText);
   const [minSentences, setMinSentences] = useState(2);
@@ -47,6 +57,7 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
   const [isSplitting, setIsSplitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pagesCreated, setPagesCreated] = useState(false);
+  const [sceneHints, setSceneHints] = useState<SceneHint[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   usePluginMessage(useCallback((msg) => {
@@ -75,6 +86,7 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
     const val = e.target.value;
     setText(val);
     onTextChange(val);
+    setSceneHints([]); // Manual edit invalidates AI scene hints
   }, [onTextChange]);
 
   // AI auto-split: send story text to Gemini, get page-split result back into textarea
@@ -88,42 +100,76 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
     setError(null);
 
     try {
-      const prompt = `다음 동화 텍스트를 페이지별로 나눠주세요.
+      // Build character info section if available
+      const characterSection = characters.length > 0
+        ? `\n## 등장인물\n${characters.map(c => `- ${c.name}: 성격 - ${c.personality}, 외형 - ${c.appearance}`).join('\n')}`
+        : '';
 
-규칙:
+      const titleSection = storyTitle ? `\n## 동화 제목: ${storyTitle}` : '';
+
+      const prompt = `당신은 어린이 동화책 편집자입니다.
+동화책에서는 각 페이지에 하나의 삽화가 들어갑니다.
+"한 페이지 = 한 장의 그림"이 되도록 페이지를 나눠주세요.
+
+## 핵심 원칙
+하나의 그림으로 그릴 수 있는 문장들을 같은 페이지에 묶으세요.
+- 같은 장소 + 같은 시간 + 같은 인물 상호작용 → 같은 페이지
+- 장소 변경 → 새 페이지
+- 시간 점프 → 새 페이지
+- 인물 구성이 크게 변경 → 새 페이지
+
+## 추가 규칙
 - 한 페이지에 최소 ${minSentences}문장, 최대 ${maxSentences}문장
-- 장면이 전환되는 곳에서는 반드시 페이지를 나눕니다
-- 대화와 서술이 자연스럽게 끊기는 곳에서 나눕니다
 - 같은 페이지 내에서 화자가 바뀌거나 문단이 나뉘는 곳에는 빈 줄 1개를 넣어주세요
+- 원본 텍스트를 절대 수정하지 마세요. 페이지 구분만 해주세요.
+${titleSection}${characterSection}
 
-출력 형식: JSON 배열로 응답해주세요. 각 요소는 한 페이지의 텍스트입니다.
-[
-  "첫 번째 페이지 텍스트...",
-  "두 번째 페이지 텍스트...",
-  ...
-]
-원본 텍스트를 절대 수정하지 마세요. 페이지 구분만 해주세요.
+## 동화 텍스트
+${rawText}
 
-텍스트:
-${rawText}`;
+## 출력 형식 (JSON)
+{
+  "pages": [
+    {
+      "text": "이 페이지의 원본 텍스트 (수정 금지)",
+      "sceneHint": "삽화 설명: 이 페이지 그림에 뭐가 보이는지 한 줄 (한국어)",
+      "characters": ["등장 인물 이름"],
+      "location": "장소 (한국어)"
+    }
+  ]
+}`;
 
       const result = await callGemini(apiKey, prompt, 'gemini-2.5-flash');
-      const pages: string[] = JSON.parse(extractJson(result));
+      const parsed = JSON.parse(extractJson(result));
 
-      if (!Array.isArray(pages) || pages.length === 0) {
+      // Handle new format: { pages: [...] }
+      if (parsed && Array.isArray(parsed.pages) && parsed.pages.length > 0) {
+        const pages = parsed.pages;
+        const splitText = pages.map((p: any) => (typeof p === 'string' ? p : p.text || '').trim()).join(PAGE_SEPARATOR);
+        const hints: SceneHint[] = pages.map((p: any) => ({
+          sceneHint: p.sceneHint || '',
+          characters: Array.isArray(p.characters) ? p.characters : [],
+          location: p.location || '',
+        }));
+        setText(splitText);
+        onTextChange(splitText);
+        setSceneHints(hints);
+      }
+      // Fallback: old format string[]
+      else if (Array.isArray(parsed) && parsed.length > 0) {
+        const splitText = parsed.map((p: any) => (typeof p === 'string' ? p : String(p)).trim()).join(PAGE_SEPARATOR);
+        setText(splitText);
+        onTextChange(splitText);
+        setSceneHints([]);
+      } else {
         throw new Error('AI 응답을 파싱할 수 없습니다.');
       }
-
-      // Reconstruct text with triple newlines as page separators
-      const splitText = pages.map(p => p.trim()).join(PAGE_SEPARATOR);
-      setText(splitText);
-      onTextChange(splitText);
     } catch (err: any) {
       setError(err.message || 'AI 페이지 나눔 중 오류가 발생했습니다.');
     } finally {
       setIsSplitting(false);
     }
-  }, [apiKey, text, minSentences, maxSentences, onTextChange]);
+  }, [apiKey, text, minSentences, maxSentences, onTextChange, characters, storyTitle]);
 
   const handleSavePages = useCallback(() => {
     const pageData = parsedPages.map((p) => ({
@@ -210,16 +256,40 @@ ${rawText}`;
 
         {/* Inline page breakdown */}
         {parsedPages.length > 1 && (
-          <div style={{ marginTop: 8, padding: 8, background: '#F8F9FA', borderRadius: 4, fontSize: 10, color: '#666', maxHeight: 120, overflowY: 'auto' }}>
-            {parsedPages.map((page) => (
-              <div key={page.pageIndex} style={{ padding: '2px 0', borderBottom: '1px solid #EEE' }}>
-                <strong style={{ color: '#18A0FB' }}>P{page.pageIndex + 1}</strong>
-                {page.isEmpty
-                  ? <span style={{ color: '#AAA', fontStyle: 'italic' }}> [빈 페이지]</span>
-                  : <span> {page.textBlocks.flat().join(' ').slice(0, 40)}{page.textBlocks.flat().join(' ').length > 40 ? '...' : ''}</span>
-                }
-              </div>
-            ))}
+          <div style={{ marginTop: 8, padding: 8, background: '#F8F9FA', borderRadius: 4, fontSize: 10, color: '#666', maxHeight: 180, overflowY: 'auto' }}>
+            {parsedPages.map((page) => {
+              const hint = sceneHints[page.pageIndex];
+              return (
+                <div key={page.pageIndex} style={{ padding: '3px 0', borderBottom: '1px solid #EEE' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap' }}>
+                    <strong style={{ color: '#18A0FB' }}>P{page.pageIndex + 1}</strong>
+                    {page.isEmpty
+                      ? <span style={{ color: '#AAA', fontStyle: 'italic' }}>[빈 페이지]</span>
+                      : (
+                        <>
+                          {hint && hint.location && (
+                            <span style={{ color: '#8B5CF6', fontWeight: 600 }}>{hint.location}</span>
+                          )}
+                          {hint && hint.characters.length > 0 && (
+                            <span style={{ color: '#059669' }}>{hint.characters.join(', ')}</span>
+                          )}
+                        </>
+                      )
+                    }
+                  </div>
+                  {!page.isEmpty && hint && hint.sceneHint && (
+                    <div style={{ paddingLeft: 20, color: '#888', fontStyle: 'italic', fontSize: 9, lineHeight: 1.4, marginTop: 1 }}>
+                      &ldquo;{hint.sceneHint}&rdquo;
+                    </div>
+                  )}
+                  {!page.isEmpty && (
+                    <div style={{ paddingLeft: 20, marginTop: 1 }}>
+                      {page.textBlocks.flat().join(' ').slice(0, 50)}{page.textBlocks.flat().join(' ').length > 50 ? '...' : ''}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

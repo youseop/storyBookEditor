@@ -396,6 +396,8 @@ const PipelineApp: React.FC = () => {
             onTextChange={handleStoryTextChange}
             onPagesChange={handlePagesChange}
             apiKey={apiKey}
+            characters={pipelineState.characters}
+            storyTitle={pipelineState.storyTitle}
           />
         );
       case Step.SCENE_STRUCTURE:
