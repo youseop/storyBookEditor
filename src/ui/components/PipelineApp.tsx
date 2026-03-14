@@ -389,6 +389,7 @@ const PipelineApp: React.FC = () => {
           <SceneStructurePanel
             pages={pipelineState.pages}
             characters={pipelineState.characters}
+            storyText={pipelineState.storyText}
             onPagesUpdate={(pages) => setPipelineState(prev => ({ ...prev, pages }))}
             apiKey={apiKey}
           />

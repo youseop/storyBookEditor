@@ -23,7 +23,7 @@ const ImagePlacementPanel: React.FC<ImagePlacementPanelProps> = ({
     const init: Record<number, PagePlacementState> = {};
     nonEmptyPages.forEach((p) => {
       init[p.pageIndex] = {
-        bgType: p.sceneAnalysis?.backgroundType || 'white',
+        bgType: 'full',
         customPrompt: '',
       };
     });

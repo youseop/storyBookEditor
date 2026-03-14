@@ -7,6 +7,45 @@ import type { StoryPage, Character } from '../../shared/pipeline';
 import ImageStrip from './ImageStrip';
 import ImageHoverPreview from './ImageHoverPreview';
 
+function buildImagePrompt(
+  page: StoryPage,
+  characters: Character[],
+  styleDescription: string,
+  bgType: 'white' | 'full',
+): string {
+  const analysis = page.sceneAnalysis;
+  if (!analysis) return page.textBlocks.flat().join(' ');
+
+  // Build character descriptions from sheet
+  const charDescriptions = analysis.characterNames
+    .map((name) => {
+      const char = characters.find((c) => c.name === name);
+      const charAction = analysis.characterActions[name];
+      if (!char && !charAction) return null;
+      const appearance = char?.appearance || '';
+      const action = charAction?.action || '';
+      const expression = charAction?.expression || '';
+      const position = charAction?.position || '';
+      return `${name} (${appearance}) - ${action}, ${expression}, ${position}`;
+    })
+    .filter(Boolean)
+    .join('. ');
+
+  // Build key objects
+  const objects = analysis.keyObjects
+    .map((o) => `${o.name}: ${o.description}`)
+    .join('. ');
+
+  if (bgType === 'white') {
+    // White background: characters only, no background setting
+    return `Children's book illustration. Clean white background. ${charDescriptions}. ${objects ? `Key objects: ${objects}. ` : ''}Style: ${styleDescription}. No text, illustration only.`;
+  } else {
+    // Full background: include setting
+    const bg = analysis.background;
+    return `Children's book illustration. Setting: ${bg.setting}, ${bg.time}, ${bg.mood}. ${bg.details}. Characters: ${charDescriptions}. ${objects ? `Key objects: ${objects}. ` : ''}Style: ${styleDescription}. No text, illustration only.`;
+  }
+}
+
 interface ImageBulkGenPanelProps {
   pages: StoryPage[];
   characters: Character[];
@@ -72,11 +111,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let completedCount = 0;
 
       for (const page of pagesToGen) {
-        const scenePrompt =
-          page.sceneAnalysis?.imagePrompt ||
-          page.textBlocks.flat().join(' ');
-
         for (const bgType of ['white', 'full'] as const) {
+          const scenePrompt = buildImagePrompt(page, characters, styleDescription, bgType);
           try {
             const images = await generateSceneImages(
               apiKey,
@@ -212,14 +248,10 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       setProgress({ current: 0, total: 4 });
       setError(null);
 
-      const scenePrompt =
-        state.customPrompt ||
-        page.sceneAnalysis?.imagePrompt ||
-        page.textBlocks.flat().join(' ');
-
       let completedCount = 0;
 
       for (const bgType of ['white', 'full'] as const) {
+        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, styleDescription, bgType);
         try {
           const images = await generateSceneImages(
             apiKey,

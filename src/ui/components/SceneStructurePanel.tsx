@@ -6,55 +6,138 @@ import type { StoryPage, Character, SceneAnalysis } from '../../shared/pipeline'
 interface SceneStructurePanelProps {
   pages: StoryPage[];
   characters: Character[];
+  storyText: string;
   onPagesUpdate: (pages: StoryPage[]) => void;
   apiKey: string;
 }
 
 type AnalysisStatus = 'idle' | 'analyzing' | 'done';
 
-function buildAllPagesPrompt(pages: StoryPage[], characters: Character[]): string {
-  const charList = characters.map((c) => `${c.id}: ${c.name} (${c.personality})`).join('\n');
-  const pageTexts = pages
+function buildSceneAnalysisPrompt(
+  storyText: string,
+  pages: StoryPage[],
+  characters: Character[],
+): string {
+  const charSheet = characters.map((c) => ({
+    name: c.name,
+    personality: c.personality,
+    appearance: c.appearance,
+  }));
+
+  const pageDialogues = pages
     .filter((p) => !p.isEmpty)
-    .map((p) => {
+    .map((p, idx, arr) => {
       const text = p.textBlocks.map((b) => b.join('\n')).join('\n\n');
-      return `페이지 ${p.pageIndex + 1}:\n${text}`;
-    })
-    .join('\n---\n');
+      // Include previous scene context if available
+      const prevPage = idx > 0 ? arr[idx - 1] : null;
+      const prevContext = prevPage?.sceneAnalysis
+        ? `[이전 장면: ${prevPage.sceneAnalysis.sceneDescription}]`
+        : '';
+      return {
+        pageIndex: p.pageIndex + 1,
+        dialogue: text,
+        previousSceneContext: prevContext || undefined,
+      };
+    });
 
-  return `다음은 동화책의 페이지별 대사입니다. 각 페이지에 대해 분석해주세요. JSON 배열로 응답해주세요.
-등장인물 목록:
-${charList}
+  return `당신은 동화책 일러스트레이터를 위한 장면 분석 전문가입니다.
+아래 동화의 전체 이야기와 등장인물 정보를 읽고, 각 페이지별로 이미지 생성에 필요한 장면 정보를 구조화해주세요.
 
-각 페이지: {pageIndex: number (1부터 시작), characters: [{characterId: string, action: string}], sceneDescription: string, imagePrompt: string, backgroundType: 'white'|'full'}
-backgroundType은 동작 중심 장면은 'white', 공간/상황 중심 장면은 'full'로 설정.
+## 전체 이야기
+${storyText}
 
-페이지 내용:
-${pageTexts}
+## 등장인물 시트 (캐릭터 이름은 반드시 이 목록에서만 사용)
+${JSON.stringify(charSheet, null, 2)}
 
-JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
+## 페이지별 대사
+${JSON.stringify(pageDialogues, null, 2)}
+
+## 응답 형식 (JSON 배열)
+각 페이지에 대해 다음 구조로 응답해주세요:
+[
+  {
+    "pageIndex": 1,
+    "background": {
+      "setting": "장소/공간 묘사 (영어, 풀배경 이미지용. 예: a cozy wooden cabin in the forest)",
+      "time": "시간대 (영어. 예: golden sunset)",
+      "mood": "분위기 (영어. 예: warm and peaceful)",
+      "details": "배경 세부 요소 (영어. 예: smoke from chimney, flowers around the path)"
+    },
+    "characterNames": ["캐릭터시트에 등록된 이름만 사용"],
+    "characterActions": {
+      "토끼": {
+        "action": "what the character is doing (영어)",
+        "expression": "facial expression (영어)",
+        "position": "위치 (영어. 예: center, left side)"
+      }
+    },
+    "keyObjects": [
+      {"name": "object name (영어)", "description": "appearance and state (영어)"}
+    ],
+    "sceneDescription": "장면 전체 요약 (한국어, UI 표시용)"
+  }
+]
+
+## 중요 규칙
+1. characterNames 배열에는 반드시 등장인물 시트에 있는 이름만 사용하세요
+2. 이전 장면 맥락(previousSceneContext)을 고려하여 장면의 연속성을 유지하세요
+3. background의 setting/time/mood/details는 모두 영어로 작성 (이미지 생성 프롬프트에 직접 사용됨)
+4. characterActions의 action/expression/position도 영어로 작성
+5. keyObjects가 없으면 빈 배열 []
+6. sceneDescription만 한국어로 작성 (UI 표시용)
+
+JSON 배열만 응답해주세요.`;
 }
 
-function buildSinglePagePrompt(page: StoryPage, characters: Character[]): string {
-  const charList = characters.map((c) => `${c.id}: ${c.name} (${c.personality})`).join('\n');
+function buildSinglePagePrompt(
+  storyText: string,
+  page: StoryPage,
+  characters: Character[],
+  prevPage?: StoryPage,
+): string {
+  const charSheet = characters.map((c) => ({
+    name: c.name,
+    personality: c.personality,
+    appearance: c.appearance,
+  }));
+
   const text = page.textBlocks.map((b) => b.join('\n')).join('\n\n');
+  const prevContext = prevPage?.sceneAnalysis
+    ? `이전 장면: ${prevPage.sceneAnalysis.sceneDescription}`
+    : '(첫 장면)';
 
-  return `다음 동화책 페이지를 분석해주세요. JSON 객체로 응답해주세요.
-등장인물 목록:
-${charList}
+  return `동화책 일러스트를 위한 장면 분석을 해주세요.
 
-형식: {characters: [{characterId: string, action: string}], sceneDescription: string, imagePrompt: string, backgroundType: 'white'|'full'}
-backgroundType은 동작 중심 장면은 'white', 공간/상황 중심 장면은 'full'로 설정.
+## 전체 이야기 맥락
+${storyText}
 
-페이지 ${page.pageIndex + 1} 내용:
+## 등장인물 시트
+${JSON.stringify(charSheet, null, 2)}
+
+## 이전 장면
+${prevContext}
+
+## 현재 페이지 (${page.pageIndex + 1}) 대사
 ${text}
 
-JSON 객체만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환하세요.`;
+## 응답 형식 (JSON 객체 하나)
+{
+  "background": {"setting": string, "time": string, "mood": string, "details": string},
+  "characterNames": [string],
+  "characterActions": {"이름": {"action": string, "expression": string, "position": string}},
+  "keyObjects": [{"name": string, "description": string}],
+  "sceneDescription": string (한국어)
+}
+
+규칙: characterNames에는 등장인물 시트의 이름만 사용. background/characterActions/keyObjects는 영어. sceneDescription만 한국어.
+
+JSON 객체만 응답해주세요.`;
 }
 
 const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   pages,
   characters,
+  storyText,
   onPagesUpdate,
   apiKey,
 }) => {
@@ -66,23 +149,21 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   const nonEmptyPages = pages.filter((p) => !p.isEmpty);
 
   const handleAnalyzeAll = useCallback(async () => {
-    if (!apiKey) {
-      setError('API 키가 설정되지 않았습니다.');
-      return;
-    }
+    if (!apiKey) { setError('API 키가 설정되지 않았습니다.'); return; }
     setStatus('analyzing');
     setError(null);
     setAnalyzedCount(0);
 
     try {
-      const prompt = buildAllPagesPrompt(pages, characters);
+      const prompt = buildSceneAnalysisPrompt(storyText, pages, characters);
       const rawJson = await callGemini(apiKey, prompt);
       const results: Array<{
         pageIndex: number;
-        characters: { characterId: string; action: string }[];
+        background: { setting: string; time: string; mood: string; details: string };
+        characterNames: string[];
+        characterActions: Record<string, { action: string; expression: string; position: string }>;
+        keyObjects: Array<{ name: string; description: string }>;
         sceneDescription: string;
-        imagePrompt: string;
-        backgroundType: 'white' | 'full';
       }> = JSON.parse(extractJson(rawJson));
 
       const updated = pages.map((page) => {
@@ -91,10 +172,11 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
           return {
             ...page,
             sceneAnalysis: {
-              characters: result.characters,
+              background: result.background,
+              characterNames: result.characterNames,
+              characterActions: result.characterActions,
+              keyObjects: result.keyObjects || [],
               sceneDescription: result.sceneDescription,
-              imagePrompt: result.imagePrompt,
-              backgroundType: result.backgroundType,
             },
           };
         }
@@ -108,13 +190,10 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       setError(err.message || '분석 중 오류가 발생했습니다.');
       setStatus('idle');
     }
-  }, [pages, characters, apiKey, onPagesUpdate]);
+  }, [pages, characters, storyText, apiKey, onPagesUpdate]);
 
   const handleReanalyzeAll = useCallback(async () => {
-    if (!apiKey) {
-      setError('API 키가 설정되지 않았습니다.');
-      return;
-    }
+    if (!apiKey) { setError('API 키가 설정되지 않았습니다.'); return; }
     if (nonEmptyPages.length === 0) return;
 
     setStatus('analyzing');
@@ -123,70 +202,28 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
     setAnalyzedCount(0);
 
     try {
-      // Build structured JSON input for AI
-      const inputData = nonEmptyPages.map((p) => ({
-        pageIndex: p.pageIndex + 1,
-        text: p.textBlocks.map((b) => b.join('\n')).join('\n\n'),
-        previousAnalysis: p.sceneAnalysis ? {
-          characters: p.sceneAnalysis.characters,
-          sceneDescription: p.sceneAnalysis.sceneDescription,
-          imagePrompt: p.sceneAnalysis.imagePrompt,
-          backgroundType: p.sceneAnalysis.backgroundType,
-        } : null,
-      }));
-
-      const charList = characters.map((c) => ({
-        id: c.id,
-        name: c.name,
-        personality: c.personality,
-      }));
-
-      const prompt = `다음 동화책의 전체 페이지를 일괄 재분석해주세요. 이전 분석 결과가 있으면 참고하되, 새롭게 분석해주세요.
-
-등장인물 목록:
-${JSON.stringify(charList, null, 2)}
-
-페이지 데이터:
-${JSON.stringify(inputData, null, 2)}
-
-응답 형식 (JSON 배열):
-[{
-  "pageIndex": number (1부터),
-  "characters": [{"characterId": string, "action": string}],
-  "sceneDescription": string,
-  "imagePrompt": string (영어, 구체적인 이미지 생성 프롬프트),
-  "backgroundType": "white" | "full",
-  "changeNote": string (이전 분석 대비 변경된 점, 없으면 "변경없음")
-}]
-
-규칙:
-- backgroundType: 동작/대화 중심 → "white", 공간/풍경/상황 중심 → "full"
-- imagePrompt: 영어로 작성, 텍스트 없이 일러스트만 생성할 수 있는 구체적 프롬프트
-- changeNote: 이전 분석과 비교하여 변경된 주요 내용 요약
-
-JSON 배열만 응답해주세요.`;
-
+      const prompt = buildSceneAnalysisPrompt(storyText, pages, characters);
       const rawJson = await callGemini(apiKey, prompt);
       const results: Array<{
         pageIndex: number;
-        characters: { characterId: string; action: string }[];
+        background: { setting: string; time: string; mood: string; details: string };
+        characterNames: string[];
+        characterActions: Record<string, { action: string; expression: string; position: string }>;
+        keyObjects: Array<{ name: string; description: string }>;
         sceneDescription: string;
-        imagePrompt: string;
-        backgroundType: 'white' | 'full';
-        changeNote?: string;
       }> = JSON.parse(extractJson(rawJson));
 
-      // Apply results
       const updated = pages.map((page) => {
         const result = results.find((r) => r.pageIndex === page.pageIndex + 1);
         if (result && !page.isEmpty) {
           return {
             ...page,
             sceneAnalysis: {
-              characters: result.characters,
+              background: result.background,
+              characterNames: result.characterNames,
+              characterActions: result.characterActions,
+              keyObjects: result.keyObjects || [],
               sceneDescription: result.sceneDescription,
-              imagePrompt: result.imagePrompt,
-              backgroundType: result.backgroundType,
             },
           };
         }
@@ -197,24 +234,17 @@ JSON 배열만 응답해주세요.`;
       setAnalyzedCount(results.length);
       setStatus('done');
 
-      // Build summary with change notes
+      // Build summary
       const summaryLines = results.map((r) => {
-        const charNames = r.characters
-          .map((ch) => {
-            const c = characters.find((c) => c.id === ch.characterId);
-            return `${c?.name || ch.characterId}(${ch.action})`;
-          })
-          .join(', ');
-        const bgLabel = r.backgroundType === 'white' ? '흰배경' : '풀배경';
-        const change = r.changeNote && r.changeNote !== '변경없음' ? ` [변경: ${r.changeNote}]` : '';
-        return `P${r.pageIndex}: ${charNames} | ${bgLabel}${change}`;
+        const chars = r.characterNames.join(', ');
+        return `P${r.pageIndex}: ${chars} | ${r.background.setting.slice(0, 30)}`;
       });
       setReanalyzeSummary(summaryLines.join('\n'));
     } catch (err: any) {
       setError(err.message || '일괄 재분석 중 오류가 발생했습니다.');
       setStatus('idle');
     }
-  }, [pages, characters, apiKey, onPagesUpdate, nonEmptyPages]);
+  }, [pages, characters, storyText, apiKey, onPagesUpdate, nonEmptyPages]);
 
   const handleReanalyze = useCallback(
     async (pageIndex: number) => {
@@ -222,9 +252,14 @@ JSON 배열만 응답해주세요.`;
       const page = pages.find((p) => p.pageIndex === pageIndex);
       if (!page || page.isEmpty) return;
 
+      // Find previous non-empty page for context
+      const prevPage = pages
+        .filter((p) => !p.isEmpty && p.pageIndex < pageIndex)
+        .sort((a, b) => b.pageIndex - a.pageIndex)[0];
+
       setError(null);
       try {
-        const prompt = buildSinglePagePrompt(page, characters);
+        const prompt = buildSinglePagePrompt(storyText, page, characters, prevPage);
         const rawJson = await callGemini(apiKey, prompt);
         const result = JSON.parse(extractJson(rawJson));
 
@@ -233,10 +268,11 @@ JSON 배열만 응답해주세요.`;
             return {
               ...p,
               sceneAnalysis: {
-                characters: result.characters,
+                background: result.background,
+                characterNames: result.characterNames,
+                characterActions: result.characterActions,
+                keyObjects: result.keyObjects || [],
                 sceneDescription: result.sceneDescription,
-                imagePrompt: result.imagePrompt,
-                backgroundType: result.backgroundType,
               } as SceneAnalysis,
             };
           }
@@ -247,43 +283,10 @@ JSON 배열만 응답해주세요.`;
         setError(`페이지 ${pageIndex + 1} 재분석 오류: ${err.message}`);
       }
     },
-    [pages, characters, apiKey, onPagesUpdate],
-  );
-
-  const handleFieldChange = useCallback(
-    (pageIndex: number, field: keyof SceneAnalysis, value: string) => {
-      const updated = pages.map((p) => {
-        if (p.pageIndex === pageIndex && p.sceneAnalysis) {
-          return {
-            ...p,
-            sceneAnalysis: { ...p.sceneAnalysis, [field]: value },
-          };
-        }
-        return p;
-      });
-      onPagesUpdate(updated);
-    },
-    [pages, onPagesUpdate],
-  );
-
-  const handleBgTypeChange = useCallback(
-    (pageIndex: number, bgType: 'white' | 'full') => {
-      const updated = pages.map((p) => {
-        if (p.pageIndex === pageIndex && p.sceneAnalysis) {
-          return {
-            ...p,
-            sceneAnalysis: { ...p.sceneAnalysis, backgroundType: bgType },
-          };
-        }
-        return p;
-      });
-      onPagesUpdate(updated);
-    },
-    [pages, onPagesUpdate],
+    [pages, characters, storyText, apiKey, onPagesUpdate],
   );
 
   const handleApplyToFigma = useCallback(() => {
-    // Update story pages as before
     postToPlugin({
       type: 'UPDATE_STORY_PAGES',
       pages: pages.map((p) => ({
@@ -292,7 +295,6 @@ JSON 배열만 응답해주세요.`;
       })),
     });
 
-    // Save scene analysis to Figma canvas
     const analyzedPages = pages.filter((p) => p.sceneAnalysis && !p.isEmpty);
     if (analyzedPages.length > 0) {
       const characterNames: Record<string, string> = {};
@@ -302,10 +304,13 @@ JSON 배열만 응답해주세요.`;
         type: 'SAVE_SCENE_ANALYSIS',
         pages: analyzedPages.map((p) => ({
           pageIndex: p.pageIndex,
-          characters: p.sceneAnalysis!.characters,
+          characters: p.sceneAnalysis!.characterNames.map(name => ({
+            characterId: name,
+            action: p.sceneAnalysis!.characterActions[name]?.action || '',
+          })),
           sceneDescription: p.sceneAnalysis!.sceneDescription,
-          imagePrompt: p.sceneAnalysis!.imagePrompt,
-          backgroundType: p.sceneAnalysis!.backgroundType,
+          imagePrompt: `${p.sceneAnalysis!.background.setting}, ${p.sceneAnalysis!.background.mood}`,
+          backgroundType: 'full' as const,
         })),
         characterNames,
       });
@@ -406,35 +411,6 @@ JSON 배열만 응답해주세요.`;
     color: '#666',
     marginBottom: 2,
     marginTop: 6,
-  };
-
-  const textareaSmallStyle: React.CSSProperties = {
-    width: '100%',
-    minHeight: 40,
-    resize: 'vertical',
-    padding: 6,
-    border: '1px solid #E5E5E5',
-    borderRadius: 4,
-    fontSize: 11,
-    lineHeight: 1.4,
-    color: '#333',
-    boxSizing: 'border-box',
-    outline: 'none',
-    fontFamily: 'inherit',
-  };
-
-  const radioGroupStyle: React.CSSProperties = {
-    display: 'flex',
-    gap: 12,
-    marginTop: 4,
-  };
-
-  const radioLabelStyle: React.CSSProperties = {
-    fontSize: 11,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    cursor: 'pointer',
   };
 
   const statusStyle: React.CSSProperties = {
@@ -544,59 +520,52 @@ JSON 배열만 응답해주세요.`;
 
               {analysis && (
                 <>
-                  {/* Character tags */}
+                  {/* Character names with validation */}
                   <div style={tagContainerStyle}>
-                    {analysis.characters.map((ch, i) => {
-                      const char = characters.find((c) => c.id === ch.characterId);
+                    {analysis.characterNames.map((name, i) => {
+                      const isValid = characters.some((c) => c.name === name);
                       return (
-                        <span key={i} style={tagStyle}>
-                          {char?.name || ch.characterId}: {ch.action}
+                        <span key={i} style={{
+                          ...tagStyle,
+                          ...(isValid ? {} : { background: '#FFE0E0', color: '#E53935', border: '1px solid #E53935' }),
+                        }}>
+                          {name}
+                          {!isValid && ' (시트에 없음!)'}
                         </span>
                       );
                     })}
                   </div>
 
-                  {/* Scene description */}
+                  {/* Character actions */}
+                  {Object.entries(analysis.characterActions).map(([name, info]) => (
+                    <div key={name} style={{ fontSize: 10, color: '#555', padding: '2px 0' }}>
+                      <strong>{name}</strong>: {info.action} ({info.expression})
+                    </div>
+                  ))}
+
+                  {/* Background info */}
+                  <div style={labelStyle}>배경</div>
+                  <div style={{ fontSize: 10, color: '#666', background: '#F5F5F5', padding: 6, borderRadius: 4, lineHeight: 1.5 }}>
+                    {analysis.background.setting} · {analysis.background.time} · {analysis.background.mood}
+                    {analysis.background.details && <div style={{ marginTop: 2, color: '#888' }}>{analysis.background.details}</div>}
+                  </div>
+
+                  {/* Key objects */}
+                  {analysis.keyObjects.length > 0 && (
+                    <>
+                      <div style={labelStyle}>핵심 사물</div>
+                      {analysis.keyObjects.map((obj, i) => (
+                        <div key={i} style={{ fontSize: 10, color: '#666', padding: '2px 0' }}>
+                          · {obj.name}: {obj.description}
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* Scene description (Korean) */}
                   <div style={labelStyle}>장면 설명</div>
-                  <textarea
-                    style={textareaSmallStyle}
-                    value={analysis.sceneDescription}
-                    onChange={(e) =>
-                      handleFieldChange(page.pageIndex, 'sceneDescription', e.target.value)
-                    }
-                  />
-
-                  {/* Image prompt */}
-                  <div style={labelStyle}>이미지 프롬프트</div>
-                  <textarea
-                    style={textareaSmallStyle}
-                    value={analysis.imagePrompt}
-                    onChange={(e) =>
-                      handleFieldChange(page.pageIndex, 'imagePrompt', e.target.value)
-                    }
-                  />
-
-                  {/* Background type */}
-                  <div style={labelStyle}>배경 타입</div>
-                  <div style={radioGroupStyle}>
-                    <label style={radioLabelStyle}>
-                      <input
-                        type="radio"
-                        name={`bg-${page.pageIndex}`}
-                        checked={analysis.backgroundType === 'white'}
-                        onChange={() => handleBgTypeChange(page.pageIndex, 'white')}
-                      />
-                      흰 배경 (동작 중심)
-                    </label>
-                    <label style={radioLabelStyle}>
-                      <input
-                        type="radio"
-                        name={`bg-${page.pageIndex}`}
-                        checked={analysis.backgroundType === 'full'}
-                        onChange={() => handleBgTypeChange(page.pageIndex, 'full')}
-                      />
-                      풀 배경 (공간/상황)
-                    </label>
+                  <div style={{ fontSize: 11, color: '#333', background: '#F9F9F9', padding: 6, borderRadius: 4, lineHeight: 1.4 }}>
+                    {analysis.sceneDescription}
                   </div>
                 </>
               )}

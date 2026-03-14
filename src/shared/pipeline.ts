@@ -127,10 +127,23 @@ export interface StoryPage {
 
 // Scene analysis result from AI (Step 6)
 export interface SceneAnalysis {
-  characters: { characterId: string; action: string }[];
-  sceneDescription: string;
-  imagePrompt: string;
-  backgroundType: 'white' | 'full';  // AI suggestion for bg type
+  background: {
+    setting: string;      // 장소/공간 설명 (풀배경용)
+    time: string;         // 시간대 (아침/낮/밤 등)
+    mood: string;         // 분위기
+    details: string;      // 배경 세부 요소들
+  };
+  characterNames: string[];  // Character sheet에 있는 이름 배열
+  characterActions: Record<string, {
+    action: string;       // 뭘 하고 있는지
+    expression: string;   // 표정
+    position: string;     // 장면 내 위치 (왼쪽, 중앙 등)
+  }>;
+  keyObjects: Array<{
+    name: string;
+    description: string;
+  }>;
+  sceneDescription: string;  // 전체 장면 요약
 }
 
 // Pipeline state persisted in pluginData
