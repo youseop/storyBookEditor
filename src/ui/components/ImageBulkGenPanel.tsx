@@ -181,7 +181,8 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
   /**
    * Generate images for a set of pages. Each page produces 4 images
-   * (2 white bg + 2 full bg).
+   * (2 white bg + 2 full bg). All pages fire in parallel — the shared
+   * rate limiter (maxConcurrent: 2, rpm: 10) handles throttling.
    */
   const generateForPages = useCallback(
     async (pagesToGen: StoryPage[]) => {
@@ -196,77 +197,83 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
 
       let completedCount = 0;
 
-      for (const page of pagesToGen) {
-        let firstImageId: string | null = null;
+      // Build all jobs: every (page, bgType) pair fires in parallel
+      const allJobs = pagesToGen.flatMap((page) =>
+        (['white', 'full'] as const).map((bgType) => ({ page, bgType }))
+      );
 
-        for (const bgType of ['white', 'full'] as const) {
-          const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
-          try {
-            const images = await generateSceneImages(
-              apiKey,
-              scenePrompt,
-              styleDescription,
-              bgType,
-              referenceImageBase64,
-              2,
-            );
+      // Track first image per page for auto-selection
+      const pageFirstImages = new Map<number, string>();
 
-            images.forEach((img, imgIdx) => {
-              const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
+      await Promise.all(allJobs.map(async ({ page, bgType }) => {
+        const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
+        try {
+          const images = await generateSceneImages(
+            apiKey,
+            scenePrompt,
+            styleDescription,
+            bgType,
+            referenceImageBase64,
+            2,
+          );
 
-              // Track first generated image for auto-selection
-              if (variant === 0) firstImageId = img.id;
+          images.forEach((img, imgIdx) => {
+            const variant = (bgType === 'white' ? 0 : 2) + imgIdx;
 
-              // Prepend to images list + track variant mapping
-              setImageStates((prev) => {
-                const prevState = prev[page.pageIndex] || {
-                  images: [],
-                  selectedImageId: null,
-                  customPrompt: '',
-                  variantMap: {},
-                };
-                return {
-                  ...prev,
-                  [page.pageIndex]: {
-                    ...prevState,
-                    images: [img, ...prevState.images],
-                    variantMap: { ...prevState.variantMap, [img.id]: variant },
-                  },
-                };
-              });
+            if (variant === 0) pageFirstImages.set(page.pageIndex, img.id);
 
-              // Send to sandbox for storage
-              const bytes = base64ToUint8Array(img.base64);
-              postToPlugin({
-                type: 'STORE_SCENE_IMAGE',
-                pageIndex: page.pageIndex,
-                imageBytes: Array.from(bytes),
-                variant,
-                backgroundType: bgType,
-              });
-
-              // Also save to gallery
-              postToPlugin({
-                type: 'SAVE_TO_GALLERY',
-                category: 'scene',
-                imageId: img.id,
-                imageBytes: Array.from(bytes),
-                label: `P${page.pageIndex + 1} ${bgType === 'white' ? '흰배경' : '풀배경'} #${imgIdx + 1}`,
-                metadata: JSON.stringify({ pageIndex: page.pageIndex, variant, bgType }),
-              });
+            // Prepend to images list + track variant mapping
+            setImageStates((prev) => {
+              const prevState = prev[page.pageIndex] || {
+                images: [],
+                selectedImageId: null,
+                customPrompt: '',
+                variantMap: {},
+              };
+              return {
+                ...prev,
+                [page.pageIndex]: {
+                  ...prevState,
+                  images: [img, ...prevState.images],
+                  variantMap: { ...prevState.variantMap, [img.id]: variant },
+                },
+              };
             });
-          } catch (err: any) {
-            if (err.message === 'Cancelled') break;
+
+            // Send to sandbox for storage
+            const bytes = base64ToUint8Array(img.base64);
+            postToPlugin({
+              type: 'STORE_SCENE_IMAGE',
+              pageIndex: page.pageIndex,
+              imageBytes: Array.from(bytes),
+              variant,
+              backgroundType: bgType,
+            });
+
+            // Also save to gallery
+            postToPlugin({
+              type: 'SAVE_TO_GALLERY',
+              category: 'scene',
+              imageId: img.id,
+              imageBytes: Array.from(bytes),
+              label: `P${page.pageIndex + 1} ${bgType === 'white' ? '흰배경' : '풀배경'} #${imgIdx + 1}`,
+              metadata: JSON.stringify({ pageIndex: page.pageIndex, variant, bgType }),
+            });
+          });
+        } catch (err: any) {
+          if (err.message !== 'Cancelled') {
             setError(`Page ${page.pageIndex + 1} (${bgType}): ${err.message}`);
           }
-
-          completedCount += 2;
-          setProgress({ current: completedCount, total: totalImages });
         }
 
-        // Auto-select first generated image and place on page
-        if (firstImageId) {
-          const autoId = firstImageId;
+        completedCount += 2;
+        setProgress({ current: completedCount, total: totalImages });
+      }));
+
+      // Auto-select first generated image for each page
+      for (const page of pagesToGen) {
+        const firstId = pageFirstImages.get(page.pageIndex);
+        if (firstId) {
           postToPlugin({
             type: 'SELECT_SCENE_IMAGE',
             pageIndex: page.pageIndex,
@@ -277,7 +284,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
             ...prev,
             [page.pageIndex]: {
               ...prev[page.pageIndex],
-              selectedImageId: autoId,
+              selectedImageId: firstId,
             },
           }));
         }
