@@ -235,14 +235,22 @@ const PipelineApp: React.FC = () => {
     setPipelineState(prev => ({ ...prev, storyText: text }));
   }, []);
 
-  const handlePagesChange = useCallback((pages: ParsedPage[]) => {
+  const handlePagesChange = useCallback((newPages: ParsedPage[]) => {
     setPipelineState(prev => ({
       ...prev,
-      pages: pages.map((p, i) => ({
-        pageIndex: i,
-        textBlocks: p.textBlocks,
-        isEmpty: p.isEmpty,
-      })),
+      pages: newPages.map((p, i) => {
+        // Preserve existing sceneAnalysis and selectedImageIndex
+        const existing = prev.pages.find(
+          (ep) => ep.pageIndex === i && !ep.isEmpty && !p.isEmpty
+        );
+        return {
+          pageIndex: i,
+          textBlocks: p.textBlocks,
+          isEmpty: p.isEmpty,
+          ...(existing?.sceneAnalysis ? { sceneAnalysis: existing.sceneAnalysis } : {}),
+          ...(existing?.selectedImageIndex !== undefined ? { selectedImageIndex: existing.selectedImageIndex } : {}),
+        };
+      }),
     }));
   }, []);
 
