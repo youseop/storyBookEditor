@@ -566,21 +566,23 @@ async function createPart2Pages(
         const enText = enBlock.join('\n');
 
         const enTextNode = figma.createText();
-        enTextNode.fontName = { family: fontFamily, style: 'Regular' };
+        enTextNode.fontName = { family: 'Inter', style: 'Regular' };
         enTextNode.characters = enText;
-        enTextNode.fontSize = TEMP_TEXT_FONT_SIZE * 0.8; // Slightly smaller for English
+        // Use proportional font size based on Korean text node
+        const koFontSize = (koTextNode.fontSize as number) || TEMP_TEXT_FONT_SIZE;
+        enTextNode.fontSize = Math.round(koFontSize * 0.8);
         enTextNode.fills = [
-          { type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } },
+          { type: 'SOLID', color: { r: 0.35, g: 0.35, b: 0.35 } },
         ];
         enTextNode.textAlignHorizontal = 'LEFT';
         enTextNode.textAlignVertical = 'TOP';
-        enTextNode.resize(TEMP_TEXT_BOX_WIDTH, TEMP_TEXT_BOX_HEIGHT);
-        enTextNode.textAutoResize = 'HEIGHT';
         enTextNode.name = `en-text-block-${blockIdx}`;
 
-        // Position below Korean text
+        // Match Korean text box position and width
         enTextNode.x = koTextNode.x;
-        enTextNode.y = koTextNode.y + koTextNode.height + 40;
+        enTextNode.y = koTextNode.y + koTextNode.height + 20;
+        enTextNode.resize(koTextNode.width, enTextNode.height);
+        enTextNode.textAutoResize = 'HEIGHT';
 
         clone.appendChild(enTextNode);
       }
