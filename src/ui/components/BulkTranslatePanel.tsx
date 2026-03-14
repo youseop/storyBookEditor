@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { postToPlugin } from '../hooks/useFigmaMessages';
 import { callGemini, extractJson } from '../utils/geminiApi';
 import type { StoryPage } from '../../shared/pipeline';
 
@@ -163,7 +164,24 @@ JSON 배열만 응답해주세요. 다른 텍스트 없이 순수 JSON만 반환
 
   const handleSaveTranslations = useCallback(() => {
     onTranslationsChange(translations);
-  }, [translations, onTranslationsChange]);
+
+    // Save translations to Figma canvas for visual feedback
+    const pageEntries = Object.entries(translations);
+    if (pageEntries.length > 0) {
+      postToPlugin({
+        type: 'SAVE_BULK_TRANSLATIONS',
+        pages: pageEntries.map(([pageIdx, englishBlocks]) => {
+          const pageIndex = Number(pageIdx);
+          const page = pages.find((p) => p.pageIndex === pageIndex);
+          return {
+            pageIndex,
+            koreanBlocks: page?.textBlocks ?? [],
+            englishBlocks,
+          };
+        }),
+      });
+    }
+  }, [translations, onTranslationsChange, pages]);
 
   // --- Styles ---
   const containerStyle: React.CSSProperties = {

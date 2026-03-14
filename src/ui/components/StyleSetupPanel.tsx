@@ -65,12 +65,19 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
   // Streaming callback: prepend each new image (newest first)
   const handleImageReady = useCallback((img: GeneratedImage) => {
     setStyleImages(prev => [img, ...prev]);
+    // Save to gallery
+    const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
+    postToPlugin({
+      type: 'SAVE_TO_GALLERY',
+      category: 'style',
+      imageId: img.id,
+      imageBytes: Array.from(bytes),
+      label: img.prompt.slice(0, 50),
+    });
     // Auto-select first generated image
     setSelectedImageId(prev => {
       if (prev === null) {
         onReferenceImageChange(img.base64);
-        // Save to Figma immediately
-        const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
         postToPlugin({
           type: 'SAVE_STYLE_GUIDE',
           description: '',
@@ -114,7 +121,7 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
   const handleSaveStyleGuide = useCallback(() => {
     postToPlugin({ type: 'SAVE_STYLE_GUIDE', description: styleDescription });
     // Also save story text to Figma
-    postToPlugin({ type: 'SAVE_STORY_TEXT' as any, title: storyTitle, text: storyText });
+    postToPlugin({ type: 'SAVE_STORY_TEXT', title: storyTitle, text: storyText });
   }, [styleDescription, storyTitle, storyText]);
 
   const handleHoverImage = useCallback((base64: string | null, event: React.MouseEvent | null) => {

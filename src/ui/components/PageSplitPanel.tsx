@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { postToPlugin } from '../hooks/useFigmaMessages';
+import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
 import { callGemini, extractJson } from '../utils/geminiApi';
 
 export interface ParsedPage {
@@ -46,7 +46,14 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
   const [maxSentences, setMaxSentences] = useState(5);
   const [isSplitting, setIsSplitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pagesCreated, setPagesCreated] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  usePluginMessage(useCallback((msg) => {
+    if (msg.type === 'STORY_PAGES_CREATED') {
+      setPagesCreated(true);
+    }
+  }, []));
 
   useEffect(() => { setText(initialText); }, [initialText]);
 
@@ -118,15 +125,16 @@ ${rawText}`;
     }
   }, [apiKey, text, minSentences, maxSentences, onTextChange]);
 
-  const handleCreatePages = useCallback(() => {
+  const handleSavePages = useCallback(() => {
+    const pageData = parsedPages.map((p) => ({
+      textBlocks: p.textBlocks,
+      isEmpty: p.isEmpty,
+    }));
     postToPlugin({
-      type: 'CREATE_STORY_PAGES',
-      pages: parsedPages.map((p) => ({
-        textBlocks: p.textBlocks,
-        isEmpty: p.isEmpty,
-      })),
+      type: pagesCreated ? 'UPDATE_STORY_PAGES' : 'CREATE_STORY_PAGES',
+      pages: pageData,
     });
-  }, [parsedPages]);
+  }, [parsedPages, pagesCreated]);
 
   // Styles
   const s = {
@@ -222,10 +230,10 @@ ${rawText}`;
         <button
           type="button"
           style={{ ...s.btnPrimary, ...(parsedPages.length === 0 ? s.disabled : {}) }}
-          onClick={handleCreatePages}
+          onClick={handleSavePages}
           disabled={parsedPages.length === 0}
         >
-          Figma에 생성
+          {pagesCreated ? 'Figma에 수정 반영' : 'Figma에 생성'}
         </button>
       </div>
     </div>

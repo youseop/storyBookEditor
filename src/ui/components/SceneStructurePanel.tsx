@@ -61,6 +61,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   const [status, setStatus] = useState<AnalysisStatus>('idle');
   const [analyzedCount, setAnalyzedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [reanalyzeSummary, setReanalyzeSummary] = useState<string | null>(null);
 
   const nonEmptyPages = pages.filter((p) => !p.isEmpty);
 
@@ -108,6 +109,112 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       setStatus('idle');
     }
   }, [pages, characters, apiKey, onPagesUpdate]);
+
+  const handleReanalyzeAll = useCallback(async () => {
+    if (!apiKey) {
+      setError('API 키가 설정되지 않았습니다.');
+      return;
+    }
+    if (nonEmptyPages.length === 0) return;
+
+    setStatus('analyzing');
+    setError(null);
+    setReanalyzeSummary(null);
+    setAnalyzedCount(0);
+
+    try {
+      // Build structured JSON input for AI
+      const inputData = nonEmptyPages.map((p) => ({
+        pageIndex: p.pageIndex + 1,
+        text: p.textBlocks.map((b) => b.join('\n')).join('\n\n'),
+        previousAnalysis: p.sceneAnalysis ? {
+          characters: p.sceneAnalysis.characters,
+          sceneDescription: p.sceneAnalysis.sceneDescription,
+          imagePrompt: p.sceneAnalysis.imagePrompt,
+          backgroundType: p.sceneAnalysis.backgroundType,
+        } : null,
+      }));
+
+      const charList = characters.map((c) => ({
+        id: c.id,
+        name: c.name,
+        personality: c.personality,
+      }));
+
+      const prompt = `다음 동화책의 전체 페이지를 일괄 재분석해주세요. 이전 분석 결과가 있으면 참고하되, 새롭게 분석해주세요.
+
+등장인물 목록:
+${JSON.stringify(charList, null, 2)}
+
+페이지 데이터:
+${JSON.stringify(inputData, null, 2)}
+
+응답 형식 (JSON 배열):
+[{
+  "pageIndex": number (1부터),
+  "characters": [{"characterId": string, "action": string}],
+  "sceneDescription": string,
+  "imagePrompt": string (영어, 구체적인 이미지 생성 프롬프트),
+  "backgroundType": "white" | "full",
+  "changeNote": string (이전 분석 대비 변경된 점, 없으면 "변경없음")
+}]
+
+규칙:
+- backgroundType: 동작/대화 중심 → "white", 공간/풍경/상황 중심 → "full"
+- imagePrompt: 영어로 작성, 텍스트 없이 일러스트만 생성할 수 있는 구체적 프롬프트
+- changeNote: 이전 분석과 비교하여 변경된 주요 내용 요약
+
+JSON 배열만 응답해주세요.`;
+
+      const rawJson = await callGemini(apiKey, prompt);
+      const results: Array<{
+        pageIndex: number;
+        characters: { characterId: string; action: string }[];
+        sceneDescription: string;
+        imagePrompt: string;
+        backgroundType: 'white' | 'full';
+        changeNote?: string;
+      }> = JSON.parse(extractJson(rawJson));
+
+      // Apply results
+      const updated = pages.map((page) => {
+        const result = results.find((r) => r.pageIndex === page.pageIndex + 1);
+        if (result && !page.isEmpty) {
+          return {
+            ...page,
+            sceneAnalysis: {
+              characters: result.characters,
+              sceneDescription: result.sceneDescription,
+              imagePrompt: result.imagePrompt,
+              backgroundType: result.backgroundType,
+            },
+          };
+        }
+        return page;
+      });
+
+      onPagesUpdate(updated);
+      setAnalyzedCount(results.length);
+      setStatus('done');
+
+      // Build summary with change notes
+      const summaryLines = results.map((r) => {
+        const charNames = r.characters
+          .map((ch) => {
+            const c = characters.find((c) => c.id === ch.characterId);
+            return `${c?.name || ch.characterId}(${ch.action})`;
+          })
+          .join(', ');
+        const bgLabel = r.backgroundType === 'white' ? '흰배경' : '풀배경';
+        const change = r.changeNote && r.changeNote !== '변경없음' ? ` [변경: ${r.changeNote}]` : '';
+        return `P${r.pageIndex}: ${charNames} | ${bgLabel}${change}`;
+      });
+      setReanalyzeSummary(summaryLines.join('\n'));
+    } catch (err: any) {
+      setError(err.message || '일괄 재분석 중 오류가 발생했습니다.');
+      setStatus('idle');
+    }
+  }, [pages, characters, apiKey, onPagesUpdate, nonEmptyPages]);
 
   const handleReanalyze = useCallback(
     async (pageIndex: number) => {
@@ -176,6 +283,7 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   );
 
   const handleApplyToFigma = useCallback(() => {
+    // Update story pages as before
     postToPlugin({
       type: 'UPDATE_STORY_PAGES',
       pages: pages.map((p) => ({
@@ -183,7 +291,26 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
         isEmpty: p.isEmpty,
       })),
     });
-  }, [pages]);
+
+    // Save scene analysis to Figma canvas
+    const analyzedPages = pages.filter((p) => p.sceneAnalysis && !p.isEmpty);
+    if (analyzedPages.length > 0) {
+      const characterNames: Record<string, string> = {};
+      characters.forEach((c) => { characterNames[c.id] = c.name; });
+
+      postToPlugin({
+        type: 'SAVE_SCENE_ANALYSIS',
+        pages: analyzedPages.map((p) => ({
+          pageIndex: p.pageIndex,
+          characters: p.sceneAnalysis!.characters,
+          sceneDescription: p.sceneAnalysis!.sceneDescription,
+          imagePrompt: p.sceneAnalysis!.imagePrompt,
+          backgroundType: p.sceneAnalysis!.backgroundType,
+        })),
+        characterNames,
+      });
+    }
+  }, [pages, characters]);
 
   // --- Styles ---
   const containerStyle: React.CSSProperties = {
@@ -337,17 +464,35 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
 
       {/* Analysis controls */}
       <div style={sectionStyle}>
-        <button
-          type="button"
-          style={{
-            ...btnPrimaryStyle,
-            ...(status === 'analyzing' ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
-          }}
-          onClick={handleAnalyzeAll}
-          disabled={status === 'analyzing' || nonEmptyPages.length === 0}
-        >
-          {status === 'analyzing' ? '분석 중...' : '전체 장면 분석'}
-        </button>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <button
+            type="button"
+            style={{
+              ...btnPrimaryStyle,
+              flex: 1,
+              ...(status === 'analyzing' ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+            }}
+            onClick={handleAnalyzeAll}
+            disabled={status === 'analyzing' || nonEmptyPages.length === 0}
+          >
+            {status === 'analyzing' ? '분석 중...' : '전체 장면 분석'}
+          </button>
+          {analyzedPagesCount > 0 && (
+            <button
+              type="button"
+              style={{
+                ...btnPrimaryStyle,
+                flex: 1,
+                background: '#F5A623',
+                ...(status === 'analyzing' ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+              }}
+              onClick={handleReanalyzeAll}
+              disabled={status === 'analyzing' || nonEmptyPages.length === 0}
+            >
+              {status === 'analyzing' ? '재분석 중...' : '일괄 재분석'}
+            </button>
+          )}
+        </div>
 
         <div style={statusStyle}>
           {status === 'idle' && nonEmptyPages.length > 0 && `${nonEmptyPages.length}개 페이지 대기`}
@@ -355,6 +500,27 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
           {status === 'done' && `${analyzedCount}개 페이지 분석 완료`}
         </div>
       </div>
+
+      {/* Reanalyze summary */}
+      {reanalyzeSummary && (
+        <div style={{
+          fontSize: 10,
+          color: '#555',
+          background: '#F8F9FA',
+          border: '1px solid #E5E5E5',
+          borderRadius: 6,
+          padding: 10,
+          whiteSpace: 'pre-wrap',
+          lineHeight: 1.6,
+          maxHeight: 160,
+          overflowY: 'auto',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#333', marginBottom: 6 }}>
+            재분석 결과 요약
+          </div>
+          {reanalyzeSummary}
+        </div>
+      )}
 
       {/* Page list */}
       <div style={{ maxHeight: 400, overflowY: 'auto' }}>
