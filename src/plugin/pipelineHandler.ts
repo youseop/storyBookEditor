@@ -1809,6 +1809,65 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
+    case 'SAVE_CHARACTER_IMAGE': {
+      try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+
+        // Create/update the character's image in the Characters frame
+        const charFrameName = FRAME_NAMES.metaCharacters;
+        const charFrame = figma.currentPage.findOne(
+          n => n.name === charFrameName && n.type === 'FRAME'
+        ) as FrameNode | null;
+
+        // Store image in Figma
+        const imageBytes = new Uint8Array(msg.imageBytes);
+        const image = figma.createImage(imageBytes);
+        const imageHash = image.hash;
+
+        // Store in data node for persistence
+        const dataNode = getOrCreatePipelineDataNode();
+        const existingData = dataNode.getPluginData('pk-character-images') || '{}';
+        const charImageMap = JSON.parse(existingData) as Record<string, string>;
+        charImageMap[msg.characterId] = imageHash;
+        dataNode.setPluginData('pk-character-images', JSON.stringify(charImageMap));
+
+        // If character frame exists, add/update image there
+        if (charFrame) {
+          // Find or create image rectangle for this character
+          const imgName = `char-img-${msg.characterId}`;
+          const existingImg = charFrame.findOne(n => n.name === imgName);
+          if (existingImg) existingImg.remove();
+
+          // Find the character's name text node to position image next to it
+          const allChildren = charFrame.findAll(n => n.type === 'TEXT') as TextNode[];
+          const nameNode = allChildren.find(n => n.characters === (msg.characterName || '(이름 없음)'));
+
+          const imgRect = figma.createRectangle();
+          imgRect.name = imgName;
+          imgRect.resize(120, 120);
+          imgRect.cornerRadius = 12;
+          imgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
+
+          if (nameNode) {
+            imgRect.x = 660;
+            imgRect.y = nameNode.y - 10;
+          } else {
+            imgRect.x = 660;
+            imgRect.y = 100;
+          }
+
+          charFrame.appendChild(imgRect);
+        }
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save character image',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
     case 'SAVE_KEY_COLORS': {
       try {
         const dataNode = getOrCreatePipelineDataNode();
@@ -2313,6 +2372,627 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         figma.ui.postMessage({
           type: 'ERROR',
           message: 'Failed to apply key expressions',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_SCENE_ANALYSIS': {
+      try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+        const frameName = FRAME_NAMES.metaSceneAnalysis;
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.x = META_AREA_X;
+        frame.y = META_AREA_Y + META_SECTION_GAP * 8;
+        frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
+        frame.locked = true;
+        frame.cornerRadius = 16;
+
+        const title = figma.createText();
+        title.fontName = { family: 'Inter', style: 'Bold' };
+        title.characters = 'Scene Analysis';
+        title.fontSize = 48;
+        title.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+        title.x = 40;
+        title.y = 30;
+        frame.appendChild(title);
+
+        let yPos = 100;
+        const m = msg as any;
+
+        for (const page of m.pages) {
+          // Page header
+          const pageHeader = figma.createText();
+          pageHeader.fontName = { family: 'Inter', style: 'Bold' };
+          pageHeader.characters = `Page ${page.pageIndex + 1}`;
+          pageHeader.fontSize = 28;
+          pageHeader.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          pageHeader.x = 40;
+          pageHeader.y = yPos;
+          frame.appendChild(pageHeader);
+          yPos += 40;
+
+          // Characters
+          const charNames = page.characters
+            .map((ch: any) => `${m.characterNames[ch.characterId] || ch.characterId}: ${ch.action}`)
+            .join(', ');
+          const charText = figma.createText();
+          charText.fontName = { family: 'Inter', style: 'Regular' };
+          charText.characters = `인물: ${charNames}`;
+          charText.fontSize = 18;
+          charText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+          charText.resize(700, 30);
+          charText.textAutoResize = 'HEIGHT';
+          charText.x = 40;
+          charText.y = yPos;
+          frame.appendChild(charText);
+          yPos += charText.height + 8;
+
+          // Scene description
+          const sceneText = figma.createText();
+          sceneText.fontName = { family: 'Inter', style: 'Regular' };
+          sceneText.characters = `장면: ${page.sceneDescription}`;
+          sceneText.fontSize = 18;
+          sceneText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+          sceneText.resize(700, 30);
+          sceneText.textAutoResize = 'HEIGHT';
+          sceneText.x = 40;
+          sceneText.y = yPos;
+          frame.appendChild(sceneText);
+          yPos += sceneText.height + 8;
+
+          // Image prompt
+          const promptText = figma.createText();
+          promptText.fontName = { family: 'Inter', style: 'Regular' };
+          promptText.characters = `프롬프트: ${page.imagePrompt}`;
+          promptText.fontSize = 18;
+          promptText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+          promptText.resize(700, 30);
+          promptText.textAutoResize = 'HEIGHT';
+          promptText.x = 40;
+          promptText.y = yPos;
+          frame.appendChild(promptText);
+          yPos += promptText.height + 8;
+
+          // Background type
+          const bgText = figma.createText();
+          bgText.fontName = { family: 'Inter', style: 'Regular' };
+          bgText.characters = `배경: ${page.backgroundType === 'white' ? '흰 배경' : '풀 배경'}`;
+          bgText.fontSize = 16;
+          bgText.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
+          bgText.x = 40;
+          bgText.y = yPos;
+          frame.appendChild(bgText);
+          yPos += 40;
+        }
+
+        frame.resize(800, Math.max(200, yPos + 40));
+
+        figma.ui.postMessage({ type: 'SCENE_ANALYSIS_SAVED', success: true });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save scene analysis',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_BULK_TRANSLATIONS': {
+      try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+        const frameName = FRAME_NAMES.metaTranslations;
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.x = META_AREA_X;
+        frame.y = META_AREA_Y + META_SECTION_GAP * 9;
+        frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
+        frame.locked = true;
+        frame.cornerRadius = 16;
+
+        const title = figma.createText();
+        title.fontName = { family: 'Inter', style: 'Bold' };
+        title.characters = 'Translations';
+        title.fontSize = 48;
+        title.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+        title.x = 40;
+        title.y = 30;
+        frame.appendChild(title);
+
+        let yPos = 100;
+        const m = msg as any;
+
+        for (const page of m.pages) {
+          // Page header
+          const pageHeader = figma.createText();
+          pageHeader.fontName = { family: 'Inter', style: 'Bold' };
+          pageHeader.characters = `Page ${page.pageIndex + 1}`;
+          pageHeader.fontSize = 28;
+          pageHeader.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          pageHeader.x = 40;
+          pageHeader.y = yPos;
+          frame.appendChild(pageHeader);
+          yPos += 40;
+
+          // Korean/English parallel
+          const maxBlocks = Math.max(page.koreanBlocks.length, page.englishBlocks.length);
+          for (let bi = 0; bi < maxBlocks; bi++) {
+            const ko = page.koreanBlocks[bi]?.join('\n') ?? '';
+            const en = page.englishBlocks[bi]?.join('\n') ?? '';
+
+            if (ko) {
+              const koText = figma.createText();
+              koText.fontName = { family: 'Inter', style: 'Regular' };
+              koText.characters = `KO: ${ko}`;
+              koText.fontSize = 18;
+              koText.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+              koText.resize(700, 30);
+              koText.textAutoResize = 'HEIGHT';
+              koText.x = 40;
+              koText.y = yPos;
+              frame.appendChild(koText);
+              yPos += koText.height + 4;
+            }
+
+            if (en) {
+              const enText = figma.createText();
+              enText.fontName = { family: 'Inter', style: 'Regular' };
+              enText.characters = `EN: ${en}`;
+              enText.fontSize = 18;
+              enText.fills = [{ type: 'SOLID', color: { r: 0.09, g: 0.47, b: 0.95 } }];
+              enText.resize(700, 30);
+              enText.textAutoResize = 'HEIGHT';
+              enText.x = 40;
+              enText.y = yPos;
+              frame.appendChild(enText);
+              yPos += enText.height + 12;
+            }
+          }
+
+          yPos += 16;
+        }
+
+        frame.resize(800, Math.max(200, yPos + 40));
+
+        figma.ui.postMessage({ type: 'BULK_TRANSLATIONS_SAVED', success: true });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save translations',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'CREATE_COVER': {
+      try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+        const frameName = 'PK-Cover';
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        // Cover is 2:1 ratio (same as spread)
+        const coverW = STORY_PAGE_WIDTH * 2;
+        const coverH = STORY_PAGE_HEIGHT;
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.resize(coverW, coverH);
+        frame.x = -coverW - 200;
+        frame.y = 0;
+        frame.fills = [{ type: 'SOLID', color: hexToFigmaColor(msg.keyColorA) }];
+        frame.clipsContent = true;
+
+        // Background image
+        if (msg.imageBytes && msg.imageBytes.length > 0) {
+          const imageBytes = new Uint8Array(msg.imageBytes);
+          const image = figma.createImage(imageBytes);
+          const bgRect = figma.createRectangle();
+          bgRect.name = 'cover-image';
+          bgRect.resize(coverW, coverH);
+          bgRect.x = 0;
+          bgRect.y = 0;
+          bgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: image.hash }];
+          frame.appendChild(bgRect);
+        }
+
+        // Title overlay area (bottom center)
+        const overlayH = Math.round(coverH * 0.35);
+        const overlay = figma.createFrame();
+        overlay.name = 'title-overlay';
+        overlay.resize(coverW, overlayH);
+        overlay.x = 0;
+        overlay.y = coverH - overlayH;
+        overlay.fills = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, opacity: 0.35 }];
+        frame.appendChild(overlay);
+
+        // Korean title
+        if (msg.titleKo) {
+          const koTitle = figma.createText();
+          koTitle.fontName = { family: 'Inter', style: 'Bold' };
+          koTitle.characters = msg.titleKo;
+          koTitle.fontSize = Math.round(coverH * 0.08);
+          koTitle.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+          koTitle.textAlignHorizontal = 'CENTER';
+          koTitle.resize(coverW - 200, 200);
+          koTitle.textAutoResize = 'HEIGHT';
+          koTitle.x = 100;
+          koTitle.y = coverH - overlayH + Math.round(overlayH * 0.2);
+          frame.appendChild(koTitle);
+        }
+
+        // English title
+        if (msg.titleEn) {
+          const enTitle = figma.createText();
+          enTitle.fontName = { family: 'Inter', style: 'Regular' };
+          enTitle.characters = msg.titleEn;
+          enTitle.fontSize = Math.round(coverH * 0.04);
+          enTitle.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, opacity: 0.85 }];
+          enTitle.textAlignHorizontal = 'CENTER';
+          enTitle.resize(coverW - 200, 100);
+          enTitle.textAutoResize = 'HEIGHT';
+          enTitle.x = 100;
+          enTitle.y = coverH - overlayH + Math.round(overlayH * 0.65);
+          frame.appendChild(enTitle);
+        }
+
+        figma.viewport.scrollAndZoomIntoView([frame]);
+
+        figma.ui.postMessage({ type: 'COVER_CREATED', success: true });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to create cover',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'SAVE_TO_GALLERY': {
+      try {
+        const galleryName = FRAME_NAMES.imageGallery;
+        let gallery = figma.currentPage.findOne(
+          n => n.name === galleryName && n.type === 'FRAME'
+        ) as FrameNode | null;
+
+        if (!gallery) {
+          await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+          await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+          gallery = figma.createFrame();
+          gallery.name = galleryName;
+          gallery.x = META_AREA_X - 7000;
+          gallery.y = 0;
+          gallery.resize(3000, 600);
+          gallery.fills = [{ type: 'SOLID', color: { r: 0.97, g: 0.97, b: 0.98 } }];
+          gallery.cornerRadius = 24;
+
+          const title = figma.createText();
+          title.fontName = { family: 'Inter', style: 'Bold' };
+          title.characters = 'Image Gallery';
+          title.fontSize = 64;
+          title.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          title.x = 60;
+          title.y = 40;
+          gallery.appendChild(title);
+        } else {
+          await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+          await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+        }
+
+        // Find or create category section
+        const categoryNames: Record<string, string> = {
+          style: 'Style References',
+          character: 'Character Images',
+          scene: 'Scene Images',
+          cover: 'Cover Images',
+        };
+        const categoryOrder = ['style', 'character', 'scene', 'cover'];
+        const sectionName = `gallery-section-${msg.category}`;
+        let section = gallery.findOne(n => n.name === sectionName) as FrameNode | null;
+
+        if (!section) {
+          section = figma.createFrame();
+          section.name = sectionName;
+          section.fills = [];
+          section.layoutMode = 'NONE';
+
+          // Position section based on category order
+          const sectionIdx = categoryOrder.indexOf(msg.category);
+          const sectionY = 140 + sectionIdx * 350;
+          section.x = 60;
+          section.y = sectionY;
+          section.resize(2880, 320);
+
+          // Section title
+          const sectionTitle = figma.createText();
+          sectionTitle.fontName = { family: 'Inter', style: 'Bold' };
+          sectionTitle.characters = categoryNames[msg.category] || msg.category;
+          sectionTitle.fontSize = 32;
+          sectionTitle.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
+          sectionTitle.x = 0;
+          sectionTitle.y = 0;
+          section.appendChild(sectionTitle);
+
+          gallery.appendChild(section);
+        }
+
+        // Check if this image ID already exists
+        const existingImg = section.findOne(n => n.name === `img-${msg.imageId}`);
+        if (existingImg) {
+          // Already saved, skip
+          return true;
+        }
+
+        // Create image
+        const imageBytes = new Uint8Array(msg.imageBytes);
+        const image = figma.createImage(imageBytes);
+
+        // Count existing images in section to determine position
+        const existingImages = section.findAll(n => n.name.startsWith('img-'));
+        const imgIdx = existingImages.length;
+        const imgSize = 240;
+        const imgGap = 20;
+        const imgsPerRow = Math.floor(2880 / (imgSize + imgGap));
+        const col = imgIdx % imgsPerRow;
+        const row = Math.floor(imgIdx / imgsPerRow);
+
+        const imgRect = figma.createRectangle();
+        imgRect.name = `img-${msg.imageId}`;
+        imgRect.resize(imgSize, imgSize);
+        imgRect.x = col * (imgSize + imgGap);
+        imgRect.y = 50 + row * (imgSize + imgGap + 30);
+        imgRect.cornerRadius = 12;
+        imgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: image.hash }];
+        imgRect.setPluginData('imageId', msg.imageId);
+        imgRect.setPluginData('category', msg.category);
+        imgRect.setPluginData('label', msg.label);
+        if (msg.metadata) imgRect.setPluginData('metadata', msg.metadata);
+        section.appendChild(imgRect);
+
+        // Add label
+        const labelText = figma.createText();
+        labelText.fontName = { family: 'Inter', style: 'Regular' };
+        labelText.characters = msg.label.length > 25 ? msg.label.slice(0, 25) + '...' : msg.label;
+        labelText.fontSize = 14;
+        labelText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+        labelText.x = col * (imgSize + imgGap);
+        labelText.y = 50 + row * (imgSize + imgGap + 30) + imgSize + 4;
+        labelText.name = `label-${msg.imageId}`;
+        section.appendChild(labelText);
+
+        // Resize section and gallery to fit content
+        const newSectionH = 50 + (row + 1) * (imgSize + imgGap + 30) + 20;
+        if (newSectionH > section.height) section.resize(2880, newSectionH);
+
+        // Resize gallery to fit all sections
+        let maxY = 140;
+        for (const child of gallery.children) {
+          if (child.name.startsWith('gallery-section-')) {
+            const bottomEdge = child.y + (child as FrameNode).height;
+            if (bottomEdge > maxY) maxY = bottomEdge;
+          }
+        }
+        gallery.resize(3000, Math.max(600, maxY + 60));
+
+        // Save gallery index to pluginData
+        const dataNode = getOrCreatePipelineDataNode();
+        const galleryDataRaw = dataNode.getPluginData(PLUGIN_DATA_KEYS.imageGalleryData) || '[]';
+        const galleryData = JSON.parse(galleryDataRaw) as Array<{ category: string; imageId: string; label: string; imageHash: string; metadata?: string }>;
+        galleryData.push({
+          category: msg.category,
+          imageId: msg.imageId,
+          label: msg.label,
+          imageHash: image.hash,
+          metadata: msg.metadata,
+        });
+        dataNode.setPluginData(PLUGIN_DATA_KEYS.imageGalleryData, JSON.stringify(galleryData));
+
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save to gallery',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
+    case 'LOAD_GALLERY': {
+      try {
+        const dataNode = getOrCreatePipelineDataNode();
+        const galleryDataRaw = dataNode.getPluginData(PLUGIN_DATA_KEYS.imageGalleryData) || '[]';
+        const galleryData = JSON.parse(galleryDataRaw) as Array<{ category: string; imageId: string; label: string; metadata?: string }>;
+        figma.ui.postMessage({
+          type: 'GALLERY_LOADED',
+          entries: galleryData,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'GALLERY_LOADED',
+          entries: [],
+        });
+      }
+      return true;
+    }
+
+    case 'DETECT_STEP_STATUS': {
+      try {
+        const detectedSteps: number[] = [];
+        const details: Record<number, string> = {};
+        const allNodes = figma.currentPage.children;
+        const dataNode = findPipelineDataNode();
+
+        // Step 1: Style Guide
+        const styleGuide = allNodes.find(n => n.name === FRAME_NAMES.metaStyleGuide);
+        if (styleGuide) {
+          detectedSteps.push(1);
+          details[1] = '스타일 가이드 프레임 있음';
+        }
+
+        // Step 2: Key Colors
+        if (dataNode) {
+          const colorA = dataNode.getPluginData('pk-key-color-a');
+          if (colorA) {
+            detectedSteps.push(2);
+            details[2] = `키컬러: ${colorA}`;
+          }
+        }
+
+        // Step 3: Characters
+        const charFrame = allNodes.find(n => n.name === FRAME_NAMES.metaCharacters);
+        if (charFrame) {
+          detectedSteps.push(3);
+          const charData = dataNode?.getPluginData(PLUGIN_DATA_KEYS.characterData);
+          const charCount = charData ? JSON.parse(charData).length : 0;
+          details[3] = `${charCount}명 등록됨`;
+        }
+
+        // Step 4: Character Images
+        if (dataNode) {
+          const charImages = dataNode.getPluginData('pk-character-images');
+          if (charImages && charImages !== '{}') {
+            const imgMap = JSON.parse(charImages);
+            const imgCount = Object.keys(imgMap).length;
+            if (imgCount > 0) {
+              detectedSteps.push(4);
+              details[4] = `${imgCount}명 이미지 선택됨`;
+            }
+          }
+        }
+
+        // Step 5: Page Split (Part 1 pages exist)
+        const part1Pages = allNodes.filter(n => n.name.startsWith('PK-Part1-Page'));
+        if (part1Pages.length > 0) {
+          detectedSteps.push(5);
+          details[5] = `${part1Pages.length}개 페이지 생성됨`;
+        }
+
+        // Step 6: Scene Analysis
+        const sceneAnalysis = allNodes.find(n => n.name === 'PK-Meta-SceneAnalysis');
+        if (sceneAnalysis) {
+          detectedSteps.push(6);
+          details[6] = '장면 분석 프레임 있음';
+        }
+
+        // Step 7: Scene Images
+        const sceneImageFrames = allNodes.filter(n => n.name.startsWith('PK-Meta-Page') && n.name.endsWith('-Images'));
+        if (sceneImageFrames.length > 0) {
+          detectedSteps.push(7);
+          details[7] = `${sceneImageFrames.length}개 페이지 이미지 생성됨`;
+        }
+
+        // Step 8-9: Image/Dialogue placement (check if scene-image exists in Part1 pages)
+        const pagesWithImages = part1Pages.filter(n => {
+          if (n.type !== 'FRAME') return false;
+          return (n as FrameNode).findOne(c => c.name === 'scene-image') !== null;
+        });
+        if (pagesWithImages.length > 0) {
+          detectedSteps.push(8);
+          details[8] = `${pagesWithImages.length}개 페이지에 이미지 배치됨`;
+        }
+        const pagesWithDialogue = part1Pages.filter(n => {
+          if (n.type !== 'FRAME') return false;
+          return (n as FrameNode).findOne(c => c.name.startsWith('dialogue-')) !== null;
+        });
+        if (pagesWithDialogue.length > 0) {
+          detectedSteps.push(9);
+          details[9] = `${pagesWithDialogue.length}개 페이지에 대사 배치됨`;
+        }
+
+        // Step 10: Part 1 confirm (snapshot exists)
+        const snapshots = allNodes.filter(n => n.name.startsWith('PK-Snapshot-Slot'));
+        if (snapshots.length > 0) {
+          detectedSteps.push(10);
+          details[10] = `스냅샷 ${snapshots.length}개`;
+        }
+
+        // Step 11: Translations
+        const translationFrame = allNodes.find(n => n.name === 'PK-Meta-Translations');
+        if (translationFrame) {
+          detectedSteps.push(11);
+          details[11] = '번역 프레임 있음';
+        }
+
+        // Step 12: Part 2 pages
+        const part2Pages = allNodes.filter(n => n.name.startsWith('PK-Part2-Page'));
+        if (part2Pages.length > 0) {
+          detectedSteps.push(12);
+          details[12] = `Part 2: ${part2Pages.length}페이지`;
+        }
+
+        // Step 14: Part 3 layout
+        const part3Pages = allNodes.filter(n => n.name.startsWith('PK-Part3-Page'));
+        if (part3Pages.length > 0) {
+          detectedSteps.push(14);
+          details[14] = `Part 3: ${part3Pages.length}페이지`;
+        }
+
+        // Step 18: Cover
+        const coverFrame = allNodes.find(n => n.name === 'PK-Cover');
+        if (coverFrame) {
+          detectedSteps.push(18);
+          details[18] = '표지 프레임 있음';
+        }
+
+        // Step 19: Inner pages
+        const innerPages = allNodes.filter(n => n.name.startsWith('PK-Inner-'));
+        if (innerPages.length > 0) {
+          detectedSteps.push(19);
+          details[19] = `${innerPages.length}개 내지 생성됨`;
+        }
+
+        // Step 20: Final output (check for output pages in Figma document)
+        const outputPages = figma.root.children.filter(p =>
+          p.name.startsWith('PK-Output-') || p.name.includes('Spread') || p.name.includes('Individual')
+        );
+        if (outputPages.length > 0) {
+          detectedSteps.push(20);
+          details[20] = '최종 산출물 생성됨';
+        }
+
+        // Get snapshot info
+        const snapshotInfo: Array<{ slot: number; label: string; timestamp: string }> = [];
+        for (let slot = 1; slot <= 2; slot++) {
+          const snapFrame = figma.currentPage.findOne(
+            n => n.name === FRAME_NAMES.snapshotSlot(slot)
+          ) as FrameNode | null;
+          if (snapFrame) {
+            snapshotInfo.push({
+              slot,
+              label: snapFrame.getPluginData(PLUGIN_DATA_KEYS.snapshotLabel) || `Slot ${slot}`,
+              timestamp: snapFrame.getPluginData(PLUGIN_DATA_KEYS.snapshotTimestamp) || '',
+            });
+          }
+        }
+
+        figma.ui.postMessage({
+          type: 'STEP_STATUS_DETECTED',
+          detectedSteps,
+          details,
+          snapshotInfo,
+        });
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to detect step status',
           detail: err?.message ?? String(err),
         });
       }

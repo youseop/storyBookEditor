@@ -149,6 +149,16 @@ export interface PipelineState {
   };
   characters: Character[];
   pages: StoryPage[];
+  // Part 2: translations (pageIndex → translated text blocks)
+  translations?: Record<number, string[][]>;
+  // Part 3: key expressions (pageIndex → expression cards)
+  keyExpressions?: Record<number, import('./messageTypes').ExpressionCard[]>;
+  // Key expression engine state (per page)
+  keyExprContentIdMaps?: Record<number, import('./messageTypes').ContentIdMap | undefined>;
+  keyExprPlacements?: Record<number, import('./messageTypes').CardPlacement[]>;
+  keyExprFrameIds?: Record<number, string | undefined>;
+  // EnLinesMaps serialized as Record (Map<string,string[]> → Record<string,string[]>)
+  keyExprEnLinesMaps?: Record<number, Record<string, string[]>>;
 }
 
 // Default initial state

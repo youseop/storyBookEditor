@@ -426,6 +426,83 @@ export interface CreateInnerPagesMessage {
   bookTitleEn?: string;
 }
 
+export interface CreateCoverMessage {
+  type: 'CREATE_COVER';
+  imageBytes: number[];
+  titleKo: string;
+  titleEn: string;
+  keyColorA: string;
+  keyColorB: string;
+}
+
+export interface SaveSceneAnalysisMessage {
+  type: 'SAVE_SCENE_ANALYSIS';
+  pages: Array<{
+    pageIndex: number;
+    characters: Array<{ characterId: string; action: string }>;
+    sceneDescription: string;
+    imagePrompt: string;
+    backgroundType: 'white' | 'full';
+  }>;
+  characterNames: Record<string, string>;
+}
+
+export interface SaveBulkTranslationsMessage {
+  type: 'SAVE_BULK_TRANSLATIONS';
+  pages: Array<{
+    pageIndex: number;
+    koreanBlocks: string[][];
+    englishBlocks: string[][];
+  }>;
+}
+
+export interface SaveStoryTextMessage {
+  type: 'SAVE_STORY_TEXT';
+  title: string;
+  text: string;
+}
+
+export interface SaveCharacterImageMessage {
+  type: 'SAVE_CHARACTER_IMAGE';
+  characterId: string;
+  characterName: string;
+  imageBytes: number[];
+}
+
+export interface SaveToGalleryMessage {
+  type: 'SAVE_TO_GALLERY';
+  category: 'style' | 'character' | 'scene' | 'cover';
+  imageId: string;
+  imageBytes: number[];
+  label: string;
+  metadata?: string;
+}
+
+export interface LoadGalleryMessage {
+  type: 'LOAD_GALLERY';
+}
+
+export interface DetectStepStatusMessage {
+  type: 'DETECT_STEP_STATUS';
+}
+
+export interface StepStatusDetectedMessage {
+  type: 'STEP_STATUS_DETECTED';
+  detectedSteps: number[];
+  details: Record<number, string>;
+  snapshotInfo: Array<{ slot: number; label: string; timestamp: string }>;
+}
+
+export interface GalleryLoadedMessage {
+  type: 'GALLERY_LOADED';
+  entries: Array<{
+    category: string;
+    imageId: string;
+    label: string;
+    metadata?: string;
+  }>;
+}
+
 // ---- Pipeline Messages: Sandbox → UI ----
 
 export interface PipelineStateLoadedMessage {
@@ -483,6 +560,21 @@ export interface InnerPagesCreatedMessage {
   pageCount: number;
 }
 
+export interface CoverCreatedMessage {
+  type: 'COVER_CREATED';
+  success: boolean;
+}
+
+export interface SceneAnalysisSavedMessage {
+  type: 'SCENE_ANALYSIS_SAVED';
+  success: boolean;
+}
+
+export interface BulkTranslationsSavedMessage {
+  type: 'BULK_TRANSLATIONS_SAVED';
+  success: boolean;
+}
+
 // Union types
 export type UIToSandboxMessage =
   | GenerateLayoutMessage
@@ -523,7 +615,15 @@ export type UIToSandboxMessage =
   | PlaceDialogueMessage
   | InsertPageNumbersMessage
   | GenerateFinalOutputMessage
-  | CreateInnerPagesMessage;
+  | CreateInnerPagesMessage
+  | CreateCoverMessage
+  | SaveSceneAnalysisMessage
+  | SaveBulkTranslationsMessage
+  | SaveStoryTextMessage
+  | SaveCharacterImageMessage
+  | SaveToGalleryMessage
+  | LoadGalleryMessage
+  | DetectStepStatusMessage;
 
 export type SandboxToUIMessage =
   | LayoutCreatedMessage
@@ -552,4 +652,9 @@ export type SandboxToUIMessage =
   | Part3LayoutCreatedMessage
   | FinalOutputGeneratedMessage
   | PageNumbersInsertedMessage
-  | InnerPagesCreatedMessage;
+  | InnerPagesCreatedMessage
+  | CoverCreatedMessage
+  | SceneAnalysisSavedMessage
+  | BulkTranslationsSavedMessage
+  | GalleryLoadedMessage
+  | StepStatusDetectedMessage;

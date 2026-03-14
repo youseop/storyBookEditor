@@ -30,11 +30,37 @@ const PipelineApp: React.FC = () => {
   const [pipelineState, setPipelineState] = useState<PipelineState>(createInitialPipelineState());
   const [isLoading, setIsLoading] = useState(true);
 
+  // Translations for Part 2 (pageIndex -> translated text blocks)
+  const [translations, setTranslations] = useState<Record<number, string[][]>>({});
+
+  // Key expressions for Part 3 (pageIndex -> expression cards)
+  const [keyExpressions, setKeyExpressions] = useState<Record<number, import('../../shared/messageTypes').ExpressionCard[]>>({});
+
+  // Key Expression engine state (per page)
+  const [keyExprContentIdMaps, setKeyExprContentIdMaps] = useState<Record<number, ContentIdMap | undefined>>({});
+  const [keyExprPlacements, setKeyExprPlacements] = useState<Record<number, CardPlacement[]>>({});
+  const [keyExprFrameIds, setKeyExprFrameIds] = useState<Record<number, string | undefined>>({});
+  const [keyExprEnLinesMaps, setKeyExprEnLinesMaps] = useState<Record<number, Map<string, string[]>>>({});
+
+  // Settings & Log UI state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLogOpen, setIsLogOpen] = useState(false);
+  const [snapshotInfo, setSnapshotInfo] = useState<Array<{ slot: number; label: string; timestamp: string }>>([]);
+
+  // Get API key from pipeline state or localStorage
+  const [apiKey, setApiKey] = useState('');
+  useEffect(() => {
+    postToPlugin({ type: 'LOAD_API_KEY' });
+  }, []);
+
   // Load pipeline state from Figma on startup
   useEffect(() => {
     postToPlugin({ type: 'LOAD_PIPELINE_STATE' });
     // If no state is loaded within 1s, assume new project
-    const timer = setTimeout(() => setIsLoading(false), 1000);
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+      postToPlugin({ type: 'DETECT_STEP_STATUS' });
+    }, 1000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -44,6 +70,19 @@ const PipelineApp: React.FC = () => {
       case 'PIPELINE_STATE_LOADED':
         if (msg.state) {
           setPipelineState(msg.state);
+          // Restore separate state variables from persisted state
+          if (msg.state.translations) setTranslations(msg.state.translations);
+          if (msg.state.keyExpressions) setKeyExpressions(msg.state.keyExpressions);
+          if (msg.state.keyExprContentIdMaps) setKeyExprContentIdMaps(msg.state.keyExprContentIdMaps);
+          if (msg.state.keyExprPlacements) setKeyExprPlacements(msg.state.keyExprPlacements);
+          if (msg.state.keyExprFrameIds) setKeyExprFrameIds(msg.state.keyExprFrameIds);
+          if (msg.state.keyExprEnLinesMaps) {
+            const restored: Record<number, Map<string, string[]>> = {};
+            for (const [key, val] of Object.entries(msg.state.keyExprEnLinesMaps)) {
+              restored[Number(key)] = new Map(Object.entries(val));
+            }
+            setKeyExprEnLinesMaps(restored);
+          }
           // Sync progress display on canvas when state is restored
           postToPlugin({
             type: 'UPDATE_PROGRESS_DISPLAY',
@@ -52,13 +91,27 @@ const PipelineApp: React.FC = () => {
           });
         }
         setIsLoading(false);
+        // Auto-detect canvas state
+        postToPlugin({ type: 'DETECT_STEP_STATUS' });
         break;
       case 'STORY_PAGES_CREATED':
         // Pages were created in Figma
         console.log(`Created ${msg.pageCount} story pages`);
         break;
+      case 'STEP_STATUS_DETECTED': {
+        const detected = msg as any;
+        // Merge detected steps into completedSteps (union, not replace)
+        setPipelineState(prev => {
+          const merged = new Set([...prev.completedSteps, ...detected.detectedSteps]);
+          return { ...prev, completedSteps: Array.from(merged) as Step[] };
+        });
+        setSnapshotInfo(detected.snapshotInfo || []);
+        break;
+      }
       case 'SNAPSHOT_CREATED':
         console.log(`Snapshot created: ${msg.label} in slot ${msg.slot}`);
+        // Refresh snapshot info
+        postToPlugin({ type: 'DETECT_STEP_STATUS' });
         break;
       case 'API_KEY_LOADED':
         setApiKey(msg.apiKey);
@@ -75,15 +128,32 @@ const PipelineApp: React.FC = () => {
     });
   }, []);
 
+  // Build full state with all persisted data for immediate saves
+  const buildFullState = useCallback((base: PipelineState): PipelineState => {
+    const serializedEnLinesMaps: Record<number, Record<string, string[]>> = {};
+    for (const [key, map] of Object.entries(keyExprEnLinesMaps)) {
+      serializedEnLinesMaps[Number(key)] = Object.fromEntries(map);
+    }
+    return {
+      ...base,
+      translations,
+      keyExpressions,
+      keyExprContentIdMaps,
+      keyExprPlacements,
+      keyExprFrameIds,
+      keyExprEnLinesMaps: serializedEnLinesMaps,
+    };
+  }, [translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements, keyExprFrameIds, keyExprEnLinesMaps]);
+
   // Navigation
   const handleStepChange = useCallback((step: Step) => {
     setPipelineState(prev => {
       const next = { ...prev, currentStep: step };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas]);
+  }, [updateProgressOnCanvas, buildFullState]);
 
   const handleNextStep = useCallback(() => {
     setPipelineState(prev => {
@@ -97,22 +167,27 @@ const PipelineApp: React.FC = () => {
         currentStep: nextStepNum as Step,
         completedSteps,
       };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas]);
+  }, [updateProgressOnCanvas, buildFullState]);
 
   const handlePrevStep = useCallback(() => {
     setPipelineState(prev => {
       const prevStepNum = prev.currentStep - 1;
       if (prevStepNum < 1) return prev;
       const next = { ...prev, currentStep: prevStepNum as Step };
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: next });
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: buildFullState(next) });
       updateProgressOnCanvas(next);
       return next;
     });
-  }, [updateProgressOnCanvas]);
+  }, [updateProgressOnCanvas, buildFullState]);
+
+  const handleSaveSnapshot = useCallback(() => {
+    const label = `수동 저장 (Step ${pipelineState.currentStep})`;
+    postToPlugin({ type: 'CREATE_SNAPSHOT', label });
+  }, [pipelineState.currentStep]);
 
   // Step-specific data handlers
   const handleStoryTitleChange = useCallback((title: string) => {
@@ -161,25 +236,21 @@ const PipelineApp: React.FC = () => {
   }, []);
 
   const handleCharacterImageSelect = useCallback((characterId: string, imageBase64: string) => {
-    setPipelineState(prev => ({
-      ...prev,
-      characters: prev.characters.map(c =>
+    setPipelineState(prev => {
+      const updatedCharacters = prev.characters.map(c =>
         c.id === characterId ? { ...c, referenceImageBase64: imageBase64, confirmed: true } : c
-      ),
-    }));
+      );
+      // Save character image to Figma
+      const bytes = Uint8Array.from(atob(imageBase64), ch => ch.charCodeAt(0));
+      postToPlugin({
+        type: 'SAVE_CHARACTER_IMAGE',
+        characterId,
+        characterName: updatedCharacters.find(c => c.id === characterId)?.name || '',
+        imageBytes: Array.from(bytes),
+      });
+      return { ...prev, characters: updatedCharacters };
+    });
   }, []);
-
-  // Translations for Part 2 (pageIndex → translated text blocks)
-  const [translations, setTranslations] = useState<Record<number, string[][]>>({});
-
-  // Key expressions for Part 3 (pageIndex → expression cards)
-  const [keyExpressions, setKeyExpressions] = useState<Record<number, import('../../shared/messageTypes').ExpressionCard[]>>({});
-
-  // Key Expression engine state (per page)
-  const [keyExprContentIdMaps, setKeyExprContentIdMaps] = useState<Record<number, ContentIdMap | undefined>>({});
-  const [keyExprPlacements, setKeyExprPlacements] = useState<Record<number, CardPlacement[]>>({});
-  const [keyExprFrameIds, setKeyExprFrameIds] = useState<Record<number, string | undefined>>({});
-  const [keyExprEnLinesMaps, setKeyExprEnLinesMaps] = useState<Record<number, Map<string, string[]>>>({});
 
   // Key Expression engine handlers
   const handleKeyExprContentIdMapChange = useCallback((pageIndex: number, map: ContentIdMap) => {
@@ -198,26 +269,23 @@ const PipelineApp: React.FC = () => {
     setKeyExprEnLinesMaps(prev => ({ ...prev, [pageIndex]: map }));
   }, []);
 
-  // Settings & Log UI state
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isLogOpen, setIsLogOpen] = useState(false);
-
-  // Get API key from pipeline state or localStorage
-  const [apiKey, setApiKey] = useState('');
-  useEffect(() => {
-    postToPlugin({ type: 'LOAD_API_KEY' });
-  }, []);
-
   // Auto-save pipeline state when data changes (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (isLoading) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: pipelineState });
+      const fullState = buildFullState(pipelineState);
+      postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: fullState });
     }, 1000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [pipelineState.storyTitle, pipelineState.storyText, pipelineState.characters, pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages, isLoading]);
+  }, [
+    pipelineState.storyTitle, pipelineState.storyText, pipelineState.characters,
+    pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages,
+    translations, keyExpressions, keyExprContentIdMaps, keyExprPlacements,
+    keyExprFrameIds, keyExprEnLinesMaps,
+    isLoading, buildFullState,
+  ]);
 
   // Render the appropriate panel for current step
   const renderStepPanel = () => {
@@ -262,6 +330,7 @@ const PipelineApp: React.FC = () => {
             onCharacterImageSelect={handleCharacterImageSelect}
             onCharactersChange={handleCharactersChange}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
             apiKey={apiKey}
           />
         );
@@ -420,6 +489,7 @@ const PipelineApp: React.FC = () => {
           <CoverPanel
             apiKey={apiKey}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
+            referenceImageBase64={pipelineState.styleGuide.referenceImageBase64}
             keyColorA={pipelineState.keyColors.colorA}
             keyColorB={pipelineState.keyColors.colorB}
           />
@@ -455,8 +525,76 @@ const PipelineApp: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'Inter, sans-serif' }}>
-      {/* Top bar with step navigation and settings gear */}
+      {/* Top bar with snapshot save + step navigation + settings gear */}
       <div style={{ position: 'relative' }}>
+        {/* Snapshot bar */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 10px',
+          borderBottom: '1px solid #F0F0F0',
+          backgroundColor: '#FAFAFA',
+          fontSize: 10,
+        }}>
+          <button
+            onClick={handleSaveSnapshot}
+            style={{
+              padding: '3px 8px',
+              fontSize: 10,
+              fontWeight: 600,
+              color: '#fff',
+              background: '#F5A623',
+              border: 'none',
+              borderRadius: 3,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+            title="현재 상태를 스냅샷으로 저장"
+          >
+            현재 상태 저장
+          </button>
+          <div style={{ flex: 1, display: 'flex', gap: 8, overflow: 'hidden' }}>
+            {snapshotInfo.length === 0 && (
+              <span style={{ color: '#CCC', fontStyle: 'italic' }}>저장된 스냅샷 없음</span>
+            )}
+            {snapshotInfo.map((snap) => {
+              const date = snap.timestamp ? new Date(snap.timestamp) : null;
+              const timeStr = date
+                ? `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+                : '';
+              return (
+                <div
+                  key={snap.slot}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 6px',
+                    background: snap.slot === 1 ? '#E8F4FD' : '#F5F5F5',
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    textOverflow: 'ellipsis',
+                    maxWidth: 140,
+                  }}
+                  title={`${snap.label}\n${snap.timestamp}`}
+                >
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: snap.slot === 1 ? '#18A0FB' : '#CCC',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {timeStr}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <StepNavigation
           currentStep={pipelineState.currentStep}
           completedSteps={pipelineState.completedSteps}
@@ -466,7 +604,7 @@ const PipelineApp: React.FC = () => {
           onClick={() => setIsSettingsOpen(true)}
           style={{
             position: 'absolute',
-            top: 8,
+            top: 8 + 28,
             right: 8,
             width: 28,
             height: 28,
