@@ -2,8 +2,12 @@ import React, { useState, useCallback } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
 import { callGemini } from '../utils/geminiApi';
 import { usePipelineImages, type GeneratedImage } from '../hooks/usePipelineImages';
+import ImageStrip from './ImageStrip';
+import ImageHoverPreview from './ImageHoverPreview';
 
 interface StyleSetupPanelProps {
+  storyTitle: string;
+  onStoryTitleChange: (title: string) => void;
   storyText: string;
   onStoryTextChange: (text: string) => void;
   styleDescription: string;
@@ -14,6 +18,8 @@ interface StyleSetupPanelProps {
 }
 
 const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
+  storyTitle,
+  onStoryTitleChange,
   storyText,
   onStoryTextChange,
   styleDescription,
@@ -24,8 +30,14 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
 }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Append-only image list (newest first)
   const [styleImages, setStyleImages] = useState<GeneratedImage[]>([]);
-  const [selectedImageIdx, setSelectedImageIdx] = useState<number | null>(null);
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
+  // Hover preview state
+  const [hoverImage, setHoverImage] = useState<string | null>(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+
   const {
     isGenerating,
     progress,
@@ -35,27 +47,13 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
   } = usePipelineImages();
 
   const handleAnalyzeStyle = useCallback(async () => {
-    if (!storyText.trim()) {
-      setError('이야기 텍스트를 먼저 입력해주세요.');
-      return;
-    }
-    if (!apiKey) {
-      setError('API Key가 설정되지 않았습니다.');
-      return;
-    }
-
+    if (!storyText.trim()) { setError('이야기 텍스트를 먼저 입력해주세요.'); return; }
+    if (!apiKey) { setError('API Key가 설정되지 않았습니다.'); return; }
     setIsAnalyzing(true);
     setError(null);
-
     try {
       const prompt = `다음 동화 이야기를 읽고, 이 이야기에 적합한 일러스트 스타일을 한국어로 3줄 이내로 제안해주세요. 색감, 분위기, 화풍을 포함해서 설명해주세요.\n\n${storyText}`;
-
       const result = await callGemini(apiKey, prompt, 'gemini-2.5-flash');
-
-      if (!result) {
-        throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
-      }
-
       onStyleDescriptionChange(result.trim());
     } catch (err: any) {
       setError(err.message || '스타일 분석 중 오류가 발생했습니다.');
@@ -64,213 +62,134 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
     }
   }, [storyText, apiKey, onStyleDescriptionChange]);
 
-  const handleGenerateStyleImages = useCallback(async () => {
-    if (!apiKey) {
-      setError('API Key가 설정되지 않았습니다. Settings에서 설정해주세요.');
-      return;
-    }
-    if (!styleDescription.trim()) {
-      setError('스타일 설명을 먼저 입력해주세요.');
-      return;
-    }
-    setError(null);
-    const images = await generateStyleImages(apiKey, styleDescription, 6);
-    setStyleImages(images);
-    setSelectedImageIdx(null);
-  }, [apiKey, styleDescription, generateStyleImages]);
-
-  const handleSelectStyleImage = useCallback(
-    (idx: number) => {
-      setSelectedImageIdx(idx);
-      const img = styleImages[idx];
-      if (img) {
+  // Streaming callback: prepend each new image (newest first)
+  const handleImageReady = useCallback((img: GeneratedImage) => {
+    setStyleImages(prev => [img, ...prev]);
+    // Auto-select first generated image
+    setSelectedImageId(prev => {
+      if (prev === null) {
         onReferenceImageChange(img.base64);
+        // Save to Figma immediately
+        const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
+        postToPlugin({
+          type: 'SAVE_STYLE_GUIDE',
+          description: '',
+          imageBytes: Array.from(bytes),
+        });
+        return img.id;
       }
-    },
-    [styleImages, onReferenceImageChange],
-  );
+      return prev;
+    });
+  }, [onReferenceImageChange]);
+
+  const handleGenerateStyleImages = useCallback(async () => {
+    if (!apiKey) { setError('API Key가 설정되지 않았습니다.'); return; }
+    if (!styleDescription.trim()) { setError('스타일 설명을 먼저 입력해주세요.'); return; }
+    setError(null);
+    await generateStyleImages(apiKey, styleDescription, 6, undefined, handleImageReady);
+  }, [apiKey, styleDescription, generateStyleImages, handleImageReady]);
+
+  // Custom prompt: generate 2 more images
+  const handleCustomGenerate = useCallback(async () => {
+    if (!apiKey || !customPrompt.trim()) return;
+    setError(null);
+    await generateStyleImages(apiKey, styleDescription, 2, customPrompt, handleImageReady);
+  }, [apiKey, styleDescription, customPrompt, generateStyleImages, handleImageReady]);
+
+  const handleSelectImage = useCallback((id: string) => {
+    setSelectedImageId(id);
+    const img = styleImages.find(i => i.id === id);
+    if (img) {
+      onReferenceImageChange(img.base64);
+      // Update Figma immediately
+      const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
+      postToPlugin({
+        type: 'SAVE_STYLE_GUIDE',
+        description: styleDescription,
+        imageBytes: Array.from(bytes),
+      });
+    }
+  }, [styleImages, onReferenceImageChange, styleDescription]);
 
   const handleSaveStyleGuide = useCallback(() => {
-    postToPlugin({
-      type: 'SAVE_STYLE_GUIDE',
-      description: styleDescription,
-    });
-  }, [styleDescription]);
+    postToPlugin({ type: 'SAVE_STYLE_GUIDE', description: styleDescription });
+    // Also save story text to Figma
+    postToPlugin({ type: 'SAVE_STORY_TEXT' as any, title: storyTitle, text: storyText });
+  }, [styleDescription, storyTitle, storyText]);
 
-  // --- Inline Styles ---
+  const handleHoverImage = useCallback((base64: string | null, event: React.MouseEvent | null) => {
+    setHoverImage(base64);
+    if (event) setHoverPos({ x: event.clientX, y: event.clientY });
+  }, []);
 
-  const containerStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    padding: 12,
-    fontFamily: 'inherit',
-    color: '#333',
-    fontSize: 12,
-  };
-
-  const headerStyle: React.CSSProperties = {
-    fontSize: 13,
-    fontWeight: 700,
-    marginBottom: 4,
-  };
-
-  const sectionStyle: React.CSSProperties = {
-    border: '1px solid #E5E5E5',
-    borderRadius: 6,
-    padding: 10,
-  };
-
-  const sectionTitleStyle: React.CSSProperties = {
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#666',
-    marginBottom: 8,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
-  };
-
-  const textareaStyle: React.CSSProperties = {
-    width: '100%',
-    minHeight: 150,
-    resize: 'vertical',
-    padding: 8,
-    border: '1px solid #E5E5E5',
-    borderRadius: 4,
-    fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-    fontSize: 11,
-    lineHeight: 1.5,
-    color: '#333',
-    boxSizing: 'border-box',
-    outline: 'none',
-  };
-
-  const smallTextareaStyle: React.CSSProperties = {
-    ...textareaStyle,
-    minHeight: 80,
-    fontFamily: 'inherit',
-  };
-
-  const primaryBtnStyle: React.CSSProperties = {
-    padding: '6px 12px',
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#fff',
-    background: '#18A0FB',
-    border: 'none',
-    borderRadius: 4,
-    cursor: 'pointer',
-    width: '100%',
-  };
-
-  const outlineBtnStyle: React.CSSProperties = {
-    padding: '6px 12px',
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#18A0FB',
-    background: '#fff',
-    border: '1px solid #18A0FB',
-    borderRadius: 4,
-    cursor: 'pointer',
-    width: '100%',
-  };
-
-  const disabledBtnStyle: React.CSSProperties = {
-    opacity: 0.5,
-    cursor: 'not-allowed',
-  };
-
-  const errorStyle: React.CSSProperties = {
-    fontSize: 11,
-    color: '#E53E3E',
-    padding: '4px 0',
-  };
-
-  const previewImageStyle: React.CSSProperties = {
-    width: '100%',
-    maxHeight: 120,
-    objectFit: 'contain',
-    borderRadius: 4,
-    border: '1px solid #E5E5E5',
-    backgroundColor: '#FAFAFA',
-  };
-
-  const placeholderBoxStyle: React.CSSProperties = {
-    width: '100%',
-    height: 80,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FAFAFA',
-    border: '1px dashed #CCC',
-    borderRadius: 4,
-    fontSize: 11,
-    color: '#AAA',
-  };
-
-  const helpTextStyle: React.CSSProperties = {
-    fontSize: 10,
-    color: '#999',
-    lineHeight: 1.5,
-    padding: '4px 0 0',
+  const s = {
+    container: { display: 'flex', flexDirection: 'column' as const, gap: 12, padding: 12, fontSize: 12, color: '#333' },
+    header: { fontSize: 13, fontWeight: 700 as const, marginBottom: 4 },
+    section: { border: '1px solid #E5E5E5', borderRadius: 6, padding: 10 },
+    sectionTitle: { fontSize: 11, fontWeight: 600 as const, color: '#666', marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+    input: { width: '100%', padding: '8px', borderRadius: 6, border: '1px solid #DDD', fontSize: 13, boxSizing: 'border-box' as const },
+    textarea: { width: '100%', minHeight: 120, resize: 'vertical' as const, padding: 8, border: '1px solid #E5E5E5', borderRadius: 4, fontFamily: "'SF Mono', monospace", fontSize: 11, lineHeight: 1.5, boxSizing: 'border-box' as const, outline: 'none' },
+    smallTextarea: { width: '100%', minHeight: 70, resize: 'vertical' as const, padding: 8, border: '1px solid #E5E5E5', borderRadius: 4, fontSize: 11, lineHeight: 1.5, boxSizing: 'border-box' as const, outline: 'none' },
+    btnPrimary: { padding: '6px 12px', fontSize: 11, fontWeight: 600 as const, color: '#fff', background: '#18A0FB', border: 'none', borderRadius: 4, cursor: 'pointer', width: '100%' },
+    btnOutline: { padding: '6px 12px', fontSize: 11, fontWeight: 600 as const, color: '#18A0FB', background: '#fff', border: '1px solid #18A0FB', borderRadius: 4, cursor: 'pointer', width: '100%' },
+    disabled: { opacity: 0.5, cursor: 'not-allowed' as const },
+    error: { fontSize: 11, color: '#E53E3E', padding: '4px 0' },
+    help: { fontSize: 10, color: '#999', lineHeight: 1.5, padding: '4px 0 0' },
   };
 
   return (
-    <div style={containerStyle}>
-      <div style={headerStyle}>Step 1: 이미지 스타일 확정</div>
+    <div style={s.container}>
+      <div style={s.header}>Step 1: 이미지 스타일 확정</div>
 
-      {/* Story text input */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>이야기 텍스트 입력</div>
+      {/* Story title + text input */}
+      <div style={s.section}>
+        <div style={s.sectionTitle}>이야기 정보</div>
+        <input
+          type="text"
+          value={storyTitle}
+          onChange={(e) => onStoryTitleChange(e.target.value)}
+          placeholder="동화 제목을 입력하세요"
+          style={{ ...s.input, marginBottom: 8, fontWeight: 600 }}
+        />
         <textarea
-          style={textareaStyle}
+          style={s.textarea}
           value={storyText}
           onChange={(e) => onStoryTextChange(e.target.value)}
           placeholder="전체 동화 이야기를 여기에 붙여넣으세요..."
           spellCheck={false}
         />
-        <div style={helpTextStyle}>
-          전체 이야기를 입력하면 AI가 스타일을 분석합니다.
-        </div>
+        <div style={s.help}>제목과 이야기는 피그마에 자동 저장됩니다.</div>
       </div>
 
       {/* Style description */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>이미지 스타일 설정</div>
+      <div style={s.section}>
+        <div style={s.sectionTitle}>이미지 스타일 설정</div>
         <button
           type="button"
-          style={{
-            ...outlineBtnStyle,
-            ...(isAnalyzing || !storyText.trim() ? disabledBtnStyle : {}),
-            marginBottom: 8,
-          }}
+          style={{ ...s.btnOutline, ...(isAnalyzing || !storyText.trim() ? s.disabled : {}), marginBottom: 8 }}
           onClick={handleAnalyzeStyle}
           disabled={isAnalyzing || !storyText.trim()}
         >
           {isAnalyzing ? '분석 중...' : 'AI 스타일 분석'}
         </button>
         <textarea
-          style={smallTextareaStyle}
+          style={s.smallTextarea}
           value={styleDescription}
           onChange={(e) => onStyleDescriptionChange(e.target.value)}
-          placeholder="일러스트 스타일을 설명해주세요 (색감, 분위기, 화풍 등)..."
+          placeholder="일러스트 스타일을 설명해주세요..."
           spellCheck={false}
         />
-        {error && <div style={errorStyle}>{error}</div>}
+        {error && <div style={s.error}>{error}</div>}
       </div>
 
       {/* Reference image generation */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>레퍼런스 이미지</div>
+      <div style={s.section}>
+        <div style={s.sectionTitle}>레퍼런스 이미지</div>
 
-        {/* Generate button */}
+        {/* Initial generation */}
         <button
           type="button"
-          style={{
-            ...outlineBtnStyle,
-            marginBottom: 8,
-            ...(isGenerating || !styleDescription.trim() ? disabledBtnStyle : {}),
-          }}
+          style={{ ...s.btnOutline, marginBottom: 8, ...(isGenerating || !styleDescription.trim() ? s.disabled : {}) }}
           onClick={handleGenerateStyleImages}
           disabled={isGenerating || !styleDescription.trim()}
         >
@@ -280,112 +199,76 @@ const StyleSetupPanel: React.FC<StyleSetupPanelProps> = ({
         {/* Progress bar */}
         {isGenerating && (
           <div style={{ marginBottom: 8 }}>
-            <div style={{
-              width: '100%',
-              height: 4,
-              background: '#F0F0F0',
-              borderRadius: 2,
-              overflow: 'hidden',
-            }}>
-              <div style={{
-                height: '100%',
-                background: '#18A0FB',
-                borderRadius: 2,
-                transition: 'width 0.3s ease',
-                width: progress.total > 0 ? `${(progress.current / progress.total) * 100}%` : '0%',
-              }} />
+            <div style={{ width: '100%', height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', background: '#18A0FB', borderRadius: 2, transition: 'width 0.3s', width: progress.total > 0 ? `${(progress.current / progress.total) * 100}%` : '0%' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
               <span style={{ fontSize: 10, color: '#999' }}>{progress.current}/{progress.total}</span>
+              <button type="button" onClick={cancelGeneration} style={{ fontSize: 10, color: '#E53E3E', background: 'none', border: 'none', cursor: 'pointer' }}>취소</button>
+            </div>
+          </div>
+        )}
+
+        {genError && <div style={s.error}>{genError}</div>}
+
+        {/* Image strip (horizontal scroll, newest first, append-only) */}
+        {styleImages.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <ImageStrip
+              images={styleImages}
+              selectedId={selectedImageId ?? undefined}
+              onSelect={handleSelectImage}
+              imageSize={80}
+              onHoverImage={handleHoverImage}
+            />
+            <div style={s.help}>{styleImages.length}장 생성됨 · 클릭하여 선택 · 1초 hover로 크게 보기</div>
+          </div>
+        )}
+
+        {/* Custom prompt for 2 more images */}
+        {styleImages.length > 0 && !isGenerating && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>커스텀 프롬프트로 추가 생성 (2장)</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                placeholder="예: 따뜻한 가을 마을 풍경..."
+                style={{ ...s.input, flex: 1 }}
+              />
               <button
                 type="button"
-                onClick={cancelGeneration}
-                style={{ fontSize: 10, color: '#E53E3E', background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={handleCustomGenerate}
+                disabled={!customPrompt.trim() || isGenerating}
+                style={{ ...s.btnOutline, width: 'auto', whiteSpace: 'nowrap', ...((!customPrompt.trim() || isGenerating) ? s.disabled : {}) }}
               >
-                취소
+                +2장
               </button>
             </div>
           </div>
         )}
 
-        {/* Generation error */}
-        {genError && <div style={errorStyle}>{genError}</div>}
-
-        {/* Generated image grid (3x2) */}
-        {styleImages.length > 0 && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 6,
-            marginBottom: 8,
-          }}>
-            {styleImages.map((img, idx) => (
-              <div
-                key={img.id}
-                onClick={() => handleSelectStyleImage(idx)}
-                style={{
-                  cursor: 'pointer',
-                  border: selectedImageIdx === idx ? '2px solid #18A0FB' : '1px solid #E5E5E5',
-                  borderRadius: 4,
-                  overflow: 'hidden',
-                  position: 'relative',
-                }}
-              >
-                <img
-                  src={`data:image/png;base64,${img.base64}`}
-                  alt={`Style variant ${idx + 1}`}
-                  style={{ width: '100%', height: 'auto', display: 'block' }}
-                />
-                {selectedImageIdx === idx && (
-                  <div style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    background: 'rgba(24, 160, 251, 0.8)',
-                    color: '#fff',
-                    fontSize: 9,
-                    textAlign: 'center',
-                    padding: '2px 0',
-                    fontWeight: 600,
-                  }}>
-                    선택됨
-                  </div>
-                )}
-              </div>
-            ))}
+        {/* Empty state */}
+        {styleImages.length === 0 && !isGenerating && (
+          <div style={{ width: '100%', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FAFAFA', border: '1px dashed #CCC', borderRadius: 4, fontSize: 11, color: '#AAA' }}>
+            스타일 설명 입력 후 이미지를 생성하세요
           </div>
         )}
-
-        {/* Currently selected reference preview */}
-        {referenceImageBase64 && styleImages.length === 0 && (
-          <img
-            src={`data:image/png;base64,${referenceImageBase64}`}
-            alt="Reference"
-            style={previewImageStyle}
-          />
-        )}
-        {!referenceImageBase64 && styleImages.length === 0 && (
-          <div style={placeholderBoxStyle}>스타일 설명을 입력 후 이미지를 생성하세요</div>
-        )}
-
-        <div style={helpTextStyle}>
-          생성된 이미지 중 하나를 클릭하면 레퍼런스 이미지로 설정됩니다
-        </div>
       </div>
 
       {/* Save button */}
       <button
         type="button"
-        style={{
-          ...primaryBtnStyle,
-          ...((!styleDescription.trim()) ? disabledBtnStyle : {}),
-        }}
+        style={{ ...s.btnPrimary, ...(!styleDescription.trim() ? s.disabled : {}) }}
         onClick={handleSaveStyleGuide}
         disabled={!styleDescription.trim()}
       >
-        스타일 가이드 저장
+        스타일 가이드 저장 (Figma에 반영)
       </button>
+
+      {/* Hover preview overlay */}
+      <ImageHoverPreview imageBase64={hoverImage} mouseX={hoverPos.x} mouseY={hoverPos.y} />
     </div>
   );
 };

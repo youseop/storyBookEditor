@@ -1410,6 +1410,12 @@ let buildInProgress = false;
 let pendingBuildMsg: UIToSandboxMessage | null = null;
 
 async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
+  // Handle resize
+  if ((msg as any).type === 'RESIZE_UI') {
+    figma.ui.resize((msg as any).width, (msg as any).height);
+    return;
+  }
+
   // Try pipeline handler first
   const handled = await handlePipelineMessage(msg);
   if (handled) return;

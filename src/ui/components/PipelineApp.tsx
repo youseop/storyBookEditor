@@ -115,11 +115,12 @@ const PipelineApp: React.FC = () => {
   }, [updateProgressOnCanvas]);
 
   // Step-specific data handlers
+  const handleStoryTitleChange = useCallback((title: string) => {
+    setPipelineState(prev => ({ ...prev, storyTitle: title }));
+  }, []);
+
   const handleStoryTextChange = useCallback((text: string) => {
-    setPipelineState(prev => {
-      const next = { ...prev, storyText: text };
-      return next;
-    });
+    setPipelineState(prev => ({ ...prev, storyText: text }));
   }, []);
 
   const handlePagesChange = useCallback((pages: ParsedPage[]) => {
@@ -216,7 +217,7 @@ const PipelineApp: React.FC = () => {
       postToPlugin({ type: 'SAVE_PIPELINE_STATE', state: pipelineState });
     }, 1000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [pipelineState.storyText, pipelineState.characters, pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages, isLoading]);
+  }, [pipelineState.storyTitle, pipelineState.storyText, pipelineState.characters, pipelineState.keyColors, pipelineState.styleGuide, pipelineState.pages, isLoading]);
 
   // Render the appropriate panel for current step
   const renderStepPanel = () => {
@@ -226,6 +227,8 @@ const PipelineApp: React.FC = () => {
       case Step.STYLE_SETUP:
         return (
           <StyleSetupPanel
+            storyTitle={pipelineState.storyTitle}
+            onStoryTitleChange={handleStoryTitleChange}
             storyText={pipelineState.storyText}
             onStoryTextChange={handleStoryTextChange}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
@@ -257,6 +260,7 @@ const PipelineApp: React.FC = () => {
           <CharacterImagePanel
             characters={pipelineState.characters}
             onCharacterImageSelect={handleCharacterImageSelect}
+            onCharactersChange={handleCharactersChange}
             styleDescription={pipelineState.styleGuide.styleDescription || ''}
             apiKey={apiKey}
           />
@@ -267,6 +271,7 @@ const PipelineApp: React.FC = () => {
             initialText={pipelineState.storyText}
             onTextChange={handleStoryTextChange}
             onPagesChange={handlePagesChange}
+            apiKey={apiKey}
           />
         );
       case Step.SCENE_STRUCTURE:
@@ -550,6 +555,33 @@ const PipelineApp: React.FC = () => {
       <LogViewer
         isOpen={isLogOpen}
         onClose={() => setIsLogOpen(false)}
+      />
+
+      {/* Resize handle - bottom right corner */}
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const startX = e.clientX;
+          const startY = e.clientY;
+          const startW = window.innerWidth;
+          const startH = window.innerHeight;
+          const onMove = (ev: MouseEvent) => {
+            const w = Math.max(360, startW + (ev.clientX - startX));
+            const h = Math.max(400, startH + (ev.clientY - startY));
+            parent.postMessage({ pluginMessage: { type: 'RESIZE_UI', width: w, height: h } }, '*');
+          };
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        }}
+        style={{
+          position: 'fixed', bottom: 0, right: 0, width: 16, height: 16,
+          cursor: 'nwse-resize', zIndex: 9998, opacity: 0.3,
+          background: 'linear-gradient(135deg, transparent 50%, #999 50%)',
+        }}
       />
     </div>
   );

@@ -1595,13 +1595,83 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
     case 'SAVE_STYLE_GUIDE': {
       try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
         const dataNode = getOrCreatePipelineDataNode();
-        dataNode.setPluginData('pk-style-description', msg.description);
+        if (msg.description) dataNode.setPluginData('pk-style-description', msg.description);
+
+        let imageHash: string | undefined;
         if (msg.imageBytes && msg.imageBytes.length > 0) {
-          // Store image reference in pipeline data (actual image stored in Figma)
           const image = figma.createImage(new Uint8Array(msg.imageBytes));
-          dataNode.setPluginData('pk-style-image-hash', image.hash);
+          imageHash = image.hash;
+          dataNode.setPluginData('pk-style-image-hash', imageHash);
+        } else {
+          imageHash = dataNode.getPluginData('pk-style-image-hash') || undefined;
         }
+
+        // Create/update visible frame on canvas
+        const frameName = FRAME_NAMES.metaStyleGuide;
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.x = META_AREA_X;
+        frame.y = META_AREA_Y;
+        frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
+        frame.locked = true;
+        frame.cornerRadius = 16;
+
+        let contentHeight = 80;
+
+        const title = figma.createText();
+        title.fontName = { family: 'Inter', style: 'Bold' };
+        title.characters = 'Style Guide';
+        title.fontSize = 48;
+        title.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+        title.x = 40;
+        title.y = 30;
+        frame.appendChild(title);
+        contentHeight = 100;
+
+        if (msg.description) {
+          const desc = figma.createText();
+          desc.fontName = { family: 'Inter', style: 'Regular' };
+          desc.characters = msg.description;
+          desc.fontSize = 24;
+          desc.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+          desc.resize(700, 100);
+          desc.textAutoResize = 'HEIGHT';
+          desc.x = 40;
+          desc.y = contentHeight;
+          frame.appendChild(desc);
+          contentHeight += desc.height + 30;
+        }
+
+        if (imageHash) {
+          const imgRect = figma.createRectangle();
+          imgRect.name = 'style-reference-image';
+          imgRect.resize(400, 400);
+          imgRect.x = 40;
+          imgRect.y = contentHeight;
+          imgRect.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash }];
+          imgRect.cornerRadius = 12;
+          frame.appendChild(imgRect);
+
+          const imgLabel = figma.createText();
+          imgLabel.fontName = { family: 'Inter', style: 'Regular' };
+          imgLabel.characters = 'Reference Image';
+          imgLabel.fontSize = 18;
+          imgLabel.fills = [{ type: 'SOLID', color: { r: 0.6, g: 0.6, b: 0.6 } }];
+          imgLabel.x = 40;
+          imgLabel.y = contentHeight + 410;
+          frame.appendChild(imgLabel);
+          contentHeight += 450;
+        }
+
+        frame.resize(800, contentHeight + 40);
+
         figma.ui.postMessage({ type: 'STYLE_GUIDE_SAVED', success: true });
       } catch (err: any) {
         figma.ui.postMessage({
@@ -1613,10 +1683,122 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
       return true;
     }
 
+    case 'SAVE_STORY_TEXT' as any: {
+      try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
+        const m = msg as any;
+        const frameName = 'PK-Meta-StoryText';
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.x = META_AREA_X;
+        frame.y = META_AREA_Y - META_SECTION_GAP;
+        frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+        frame.locked = true;
+        frame.cornerRadius = 16;
+
+        let yPos = 40;
+
+        if (m.title) {
+          const titleText = figma.createText();
+          titleText.fontName = { family: 'Inter', style: 'Bold' };
+          titleText.characters = m.title;
+          titleText.fontSize = 200;
+          titleText.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          titleText.x = 40;
+          titleText.y = yPos;
+          titleText.resize(2400, 300);
+          titleText.textAutoResize = 'HEIGHT';
+          frame.appendChild(titleText);
+          yPos += titleText.height + 60;
+        }
+
+        if (m.text) {
+          const bodyText = figma.createText();
+          bodyText.fontName = { family: 'Inter', style: 'Regular' };
+          bodyText.characters = m.text;
+          bodyText.fontSize = 50;
+          bodyText.fills = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
+          bodyText.x = 40;
+          bodyText.y = yPos;
+          bodyText.resize(2400, 500);
+          bodyText.textAutoResize = 'HEIGHT';
+          bodyText.lineHeight = { value: 180, unit: 'PERCENT' };
+          frame.appendChild(bodyText);
+          yPos += bodyText.height + 40;
+        }
+
+        frame.resize(2500, Math.max(400, yPos + 40));
+      } catch (err: any) {
+        figma.ui.postMessage({
+          type: 'ERROR',
+          message: 'Failed to save story text',
+          detail: err?.message ?? String(err),
+        });
+      }
+      return true;
+    }
+
     case 'SAVE_CHARACTERS': {
       try {
+        await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+        await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
+
         const dataNode = getOrCreatePipelineDataNode();
         dataNode.setPluginData(PLUGIN_DATA_KEYS.characterData, JSON.stringify(msg.characters));
+
+        // Create visible character cards on canvas
+        const frameName = FRAME_NAMES.metaCharacters;
+        const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
+        if (old) old.remove();
+
+        const frame = figma.createFrame();
+        frame.name = frameName;
+        frame.x = META_AREA_X;
+        frame.y = META_AREA_Y + META_SECTION_GAP * 2;
+        frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
+        frame.locked = true;
+        frame.cornerRadius = 16;
+
+        const title = figma.createText();
+        title.fontName = { family: 'Inter', style: 'Bold' };
+        title.characters = 'Characters';
+        title.fontSize = 48;
+        title.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }];
+        title.x = 40;
+        title.y = 30;
+        frame.appendChild(title);
+
+        let cardY = 100;
+        for (const char of msg.characters) {
+          const nameText = figma.createText();
+          nameText.fontName = { family: 'Inter', style: 'Bold' };
+          nameText.characters = char.name || '(이름 없음)';
+          nameText.fontSize = 28;
+          nameText.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.13, b: 0.13 } }];
+          nameText.x = 40;
+          nameText.y = cardY;
+          frame.appendChild(nameText);
+
+          const infoText = figma.createText();
+          infoText.fontName = { family: 'Inter', style: 'Regular' };
+          infoText.characters = `성격: ${char.personality || '-'}\n외형: ${char.appearance || '-'}`;
+          infoText.fontSize = 18;
+          infoText.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+          infoText.resize(600, 60);
+          infoText.textAutoResize = 'HEIGHT';
+          infoText.x = 40;
+          infoText.y = cardY + 38;
+          frame.appendChild(infoText);
+
+          cardY += 38 + infoText.height + 20;
+        }
+
+        frame.resize(800, Math.max(200, cardY + 20));
       } catch (err: any) {
         figma.ui.postMessage({
           type: 'ERROR',

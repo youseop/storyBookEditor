@@ -137,6 +137,7 @@ export interface SceneAnalysis {
 export interface PipelineState {
   currentStep: Step;
   completedSteps: Step[];
+  storyTitle: string;
   storyText: string;
   styleGuide: {
     referenceImageBase64?: string;
@@ -155,6 +156,7 @@ export function createInitialPipelineState(): PipelineState {
   return {
     currentStep: Step.STYLE_SETUP,
     completedSteps: [],
+    storyTitle: '',
     storyText: '',
     styleGuide: {},
     keyColors: {

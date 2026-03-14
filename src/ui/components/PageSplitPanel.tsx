@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { postToPlugin } from '../hooks/useFigmaMessages';
+import { callGemini, extractJson } from '../utils/geminiApi';
 
 export interface ParsedPage {
   pageIndex: number;
@@ -11,106 +12,111 @@ interface PageSplitPanelProps {
   initialText: string;
   onTextChange: (text: string) => void;
   onPagesChange: (pages: ParsedPage[]) => void;
-  onAutoSplit?: (minSentences: number, maxSentences: number) => void;
+  apiKey: string;
 }
 
 /**
  * Parse raw story text into structured pages.
- *
- * Rules:
- *  - 3+ consecutive newlines (\n\n\n) → page boundary
- *  - 2 consecutive newlines (\n\n)    → new text block on same page
- *  - 1 newline (\n)                   → line break within text block
- *  - ">>" as sole content on a page   → empty/image-only page
  */
 function parseTextToPages(text: string): ParsedPage[] {
-  // Split into raw page chunks by 3+ consecutive newlines
   const rawPages = text.split(/\n{3,}/);
-
   return rawPages.map((rawPage, idx) => {
     const trimmed = rawPage.trim();
-
-    // Empty-page marker
     if (trimmed === '>>') {
-      return {
-        pageIndex: idx,
-        textBlocks: [],
-        isEmpty: true,
-      };
+      return { pageIndex: idx, textBlocks: [], isEmpty: true };
     }
-
-    // Split into text blocks by double newline
     const rawBlocks = trimmed.split(/\n\n/);
-
     const textBlocks = rawBlocks
-      .map((block) => {
-        const lines = block.split('\n').map((l) => l.trim());
-        return lines;
-      })
+      .map((block) => block.split('\n').map((l) => l.trim()))
       .filter((block) => block.some((line) => line.length > 0));
-
-    return {
-      pageIndex: idx,
-      textBlocks,
-      isEmpty: textBlocks.length === 0,
-    };
+    return { pageIndex: idx, textBlocks, isEmpty: textBlocks.length === 0 };
   });
 }
+
+const PAGE_SEPARATOR = '\n\n\n';
 
 const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
   initialText,
   onTextChange,
   onPagesChange,
-  onAutoSplit,
+  apiKey,
 }) => {
   const [text, setText] = useState(initialText);
   const [minSentences, setMinSentences] = useState(2);
   const [maxSentences, setMaxSentences] = useState(5);
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep local text in sync when initialText changes externally
-  useEffect(() => {
-    setText(initialText);
-  }, [initialText]);
+  useEffect(() => { setText(initialText); }, [initialText]);
 
   const parsedPages = useMemo(() => parseTextToPages(text), [text]);
+  const nonEmptyPageCount = useMemo(() => parsedPages.filter(p => !p.isEmpty).length, [parsedPages]);
 
-  // Notify parent whenever pages change
-  useEffect(() => {
-    onPagesChange(parsedPages);
-  }, [parsedPages, onPagesChange]);
+  useEffect(() => { onPagesChange(parsedPages); }, [parsedPages, onPagesChange]);
 
-  // Debounced Figma sync
+  // Debounced Figma sync (no auto-create, just update if pages exist)
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-
     debounceRef.current = setTimeout(() => {
-      postToPlugin({
-        type: 'UPDATE_STORY_PAGES',
-        pages: parsedPages.map((p) => ({
-          textBlocks: p.textBlocks,
-          isEmpty: p.isEmpty,
-        })),
-      });
+      // Don't auto-send to Figma, only on explicit "Figma에 생성" click
     }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [parsedPages]);
 
-  const handleTextChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const val = e.target.value;
-      setText(val);
-      onTextChange(val);
-    },
-    [onTextChange],
-  );
+  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setText(val);
+    onTextChange(val);
+  }, [onTextChange]);
 
-  const handleAutoSplit = useCallback(() => {
-    onAutoSplit?.(minSentences, maxSentences);
-  }, [onAutoSplit, minSentences, maxSentences]);
+  // AI auto-split: send story text to Gemini, get page-split result back into textarea
+  const handleAutoSplit = useCallback(async () => {
+    if (!apiKey) { setError('API Key가 설정되지 않았습니다.'); return; }
+    // Strip existing page breaks to get raw text
+    const rawText = text.replace(/\n{3,}/g, '\n').trim();
+    if (!rawText) { setError('이야기 텍스트를 먼저 입력해주세요.'); return; }
+
+    setIsSplitting(true);
+    setError(null);
+
+    try {
+      const prompt = `다음 동화 텍스트를 페이지별로 나눠주세요.
+
+규칙:
+- 한 페이지에 최소 ${minSentences}문장, 최대 ${maxSentences}문장
+- 장면이 전환되는 곳에서는 반드시 페이지를 나눕니다
+- 대화와 서술이 자연스럽게 끊기는 곳에서 나눕니다
+- 같은 페이지 내에서 화자가 바뀌거나 문단이 나뉘는 곳에는 빈 줄 1개를 넣어주세요
+
+출력 형식: JSON 배열로 응답해주세요. 각 요소는 한 페이지의 텍스트입니다.
+[
+  "첫 번째 페이지 텍스트...",
+  "두 번째 페이지 텍스트...",
+  ...
+]
+원본 텍스트를 절대 수정하지 마세요. 페이지 구분만 해주세요.
+
+텍스트:
+${rawText}`;
+
+      const result = await callGemini(apiKey, prompt, 'gemini-2.5-flash');
+      const pages: string[] = JSON.parse(extractJson(result));
+
+      if (!Array.isArray(pages) || pages.length === 0) {
+        throw new Error('AI 응답을 파싱할 수 없습니다.');
+      }
+
+      // Reconstruct text with triple newlines as page separators
+      const splitText = pages.map(p => p.trim()).join(PAGE_SEPARATOR);
+      setText(splitText);
+      onTextChange(splitText);
+    } catch (err: any) {
+      setError(err.message || 'AI 페이지 나눔 중 오류가 발생했습니다.');
+    } finally {
+      setIsSplitting(false);
+    }
+  }, [apiKey, text, minSentences, maxSentences, onTextChange]);
 
   const handleCreatePages = useCallback(() => {
     postToPlugin({
@@ -122,265 +128,100 @@ const PageSplitPanel: React.FC<PageSplitPanelProps> = ({
     });
   }, [parsedPages]);
 
-  // --- Inline Styles ---
-
-  const containerStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    padding: 12,
-    fontFamily: 'inherit',
-    color: '#333',
-    fontSize: 12,
-  };
-
-  const sectionStyle: React.CSSProperties = {
-    border: '1px solid #E5E5E5',
-    borderRadius: 6,
-    padding: 10,
-  };
-
-  const sectionTitleStyle: React.CSSProperties = {
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#666',
-    marginBottom: 8,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
-  };
-
-  const headerStyle: React.CSSProperties = {
-    fontSize: 13,
-    fontWeight: 700,
-    marginBottom: 4,
-  };
-
-  const settingsRowStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  };
-
-  const numberInputStyle: React.CSSProperties = {
-    width: 44,
-    padding: '3px 6px',
-    border: '1px solid #E5E5E5',
-    borderRadius: 4,
-    fontSize: 12,
-    textAlign: 'center' as const,
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: 11,
-    color: '#666',
-  };
-
-  const autoSplitBtnStyle: React.CSSProperties = {
-    marginTop: 8,
-    padding: '6px 12px',
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#18A0FB',
-    background: '#fff',
-    border: '1px solid #18A0FB',
-    borderRadius: 4,
-    cursor: 'pointer',
-    width: '100%',
-  };
-
-  const textareaStyle: React.CSSProperties = {
-    width: '100%',
-    minHeight: 200,
-    resize: 'vertical',
-    padding: 8,
-    border: '1px solid #E5E5E5',
-    borderRadius: 4,
-    fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-    fontSize: 11,
-    lineHeight: 1.5,
-    color: '#333',
-    boxSizing: 'border-box',
-    outline: 'none',
-  };
-
-  const previewListStyle: React.CSSProperties = {
-    maxHeight: 200,
-    overflowY: 'auto',
-  };
-
-  const pageItemStyle = (isEmpty: boolean): React.CSSProperties => ({
-    padding: 8,
-    borderBottom: '1px solid #F0F0F0',
-    ...(isEmpty
-      ? {
-          border: '1px dashed #CCC',
-          borderRadius: 4,
-          background: '#FAFAFA',
-          marginBottom: 4,
-        }
-      : {}),
-  });
-
-  const pageNumberStyle: React.CSSProperties = {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#999',
-    marginBottom: 2,
-  };
-
-  const blockPreviewStyle: React.CSSProperties = {
-    fontSize: 11,
-    color: '#555',
-    lineHeight: 1.4,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  };
-
-  const emptyLabelStyle: React.CSSProperties = {
-    fontSize: 11,
-    color: '#AAA',
-    fontStyle: 'italic',
-  };
-
-  const footerStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  };
-
-  const pageCountStyle: React.CSSProperties = {
-    fontSize: 12,
-    fontWeight: 600,
-    color: '#666',
-  };
-
-  const createBtnStyle: React.CSSProperties = {
-    padding: '8px 16px',
-    fontSize: 12,
-    fontWeight: 700,
-    color: '#fff',
-    background: '#18A0FB',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-  };
-
-  const helpTextStyle: React.CSSProperties = {
-    fontSize: 10,
-    color: '#999',
-    lineHeight: 1.5,
-    padding: '6px 0 2px',
+  // Styles
+  const s = {
+    container: { display: 'flex', flexDirection: 'column' as const, gap: 12, padding: 12, fontSize: 12, color: '#333' },
+    header: { fontSize: 13, fontWeight: 700 as const, marginBottom: 4 },
+    section: { border: '1px solid #E5E5E5', borderRadius: 6, padding: 10 },
+    sectionTitle: { fontSize: 11, fontWeight: 600 as const, color: '#666', marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+    row: { display: 'flex', alignItems: 'center' as const, gap: 8, flexWrap: 'wrap' as const },
+    numInput: { width: 44, padding: '3px 6px', border: '1px solid #E5E5E5', borderRadius: 4, fontSize: 12, textAlign: 'center' as const },
+    label: { fontSize: 11, color: '#666' },
+    btnOutline: { padding: '6px 12px', fontSize: 11, fontWeight: 600 as const, color: '#18A0FB', background: '#fff', border: '1px solid #18A0FB', borderRadius: 4, cursor: 'pointer', width: '100%' },
+    btnPrimary: { padding: '8px 16px', fontSize: 12, fontWeight: 700 as const, color: '#fff', background: '#18A0FB', border: 'none', borderRadius: 6, cursor: 'pointer' },
+    disabled: { opacity: 0.5, cursor: 'not-allowed' as const },
+    textarea: { width: '100%', minHeight: 250, resize: 'vertical' as const, padding: 8, border: '1px solid #E5E5E5', borderRadius: 4, fontFamily: "'SF Mono', monospace", fontSize: 11, lineHeight: 1.6, color: '#333', boxSizing: 'border-box' as const, outline: 'none' },
+    error: { fontSize: 11, color: '#E53E3E', padding: '4px 0' },
+    help: { fontSize: 10, color: '#999', lineHeight: 1.6, padding: '4px 0 0' },
+    pageIndicator: { display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 as const, marginRight: 4 },
   };
 
   return (
-    <div style={containerStyle}>
-      {/* Header */}
-      <div style={headerStyle}>Step 5: 페이지 나눔</div>
+    <div style={s.container}>
+      <div style={s.header}>Step 5: 페이지 나눔</div>
 
-      {/* Settings section */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>설정</div>
-        <div style={settingsRowStyle}>
-          <span style={labelStyle}>최소 문장 수:</span>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={minSentences}
-            onChange={(e) => setMinSentences(Math.max(1, Number(e.target.value)))}
-            style={numberInputStyle}
-          />
-          <span style={labelStyle}>최대:</span>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={maxSentences}
-            onChange={(e) => setMaxSentences(Math.max(1, Number(e.target.value)))}
-            style={numberInputStyle}
-          />
+      {/* AI Auto-split settings */}
+      <div style={s.section}>
+        <div style={s.sectionTitle}>AI 자동 나눔</div>
+        <div style={s.row}>
+          <span style={s.label}>페이지당 최소:</span>
+          <input type="number" min={1} max={20} value={minSentences} onChange={(e) => setMinSentences(Math.max(1, Number(e.target.value)))} style={s.numInput} />
+          <span style={s.label}>최대:</span>
+          <input type="number" min={1} max={50} value={maxSentences} onChange={(e) => setMaxSentences(Math.max(1, Number(e.target.value)))} style={s.numInput} />
+          <span style={s.label}>문장</span>
         </div>
         <button
           type="button"
-          style={autoSplitBtnStyle}
+          style={{ ...s.btnOutline, marginTop: 8, ...(isSplitting || !apiKey ? s.disabled : {}) }}
           onClick={handleAutoSplit}
-          disabled={!onAutoSplit}
+          disabled={isSplitting || !apiKey}
         >
-          AI 자동 나눔
+          {isSplitting ? 'AI 분석 중...' : 'AI 자동 나눔'}
         </button>
+        {!apiKey && <div style={{ ...s.help, color: '#E53E3E' }}>설정에서 API Key를 먼저 입력해주세요</div>}
+        {error && <div style={s.error}>{error}</div>}
       </div>
 
-      {/* Textarea section */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>텍스트 입력</div>
+      {/* Main textarea - page breaks visible as blank lines */}
+      <div style={s.section}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={s.sectionTitle}>텍스트 편집</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <span style={{ ...s.pageIndicator, background: '#E8F4FD', color: '#18A0FB' }}>
+              {parsedPages.length} 페이지
+            </span>
+            {parsedPages.some(p => p.isEmpty) && (
+              <span style={{ ...s.pageIndicator, background: '#FFF3E0', color: '#E65100' }}>
+                빈 페이지: {parsedPages.filter(p => p.isEmpty).length}
+              </span>
+            )}
+          </div>
+        </div>
+
         <textarea
-          style={textareaStyle}
+          style={s.textarea}
           value={text}
           onChange={handleTextChange}
-          placeholder="이야기를 입력하세요...&#10;&#10;Enter 1x = 같은 텍스트 박스 줄바꿈&#10;Enter 2x = 같은 페이지 새 텍스트 박스&#10;Enter 3x = 다음 페이지&#10;>> = 빈 페이지 (이미지 전용)"
+          placeholder={"이야기를 입력하세요...\n\n빈 줄 2개 (엔터 3번) = 페이지 나눔\n빈 줄 1개 (엔터 2번) = 같은 페이지 내 새 텍스트 블록\n>> = 빈 페이지 (이미지 전용)"}
           spellCheck={false}
         />
-        <div style={helpTextStyle}>
-          Enter 1x: 줄바꿈 &nbsp;|&nbsp; Enter 2x: 새 텍스트 박스 &nbsp;|&nbsp; Enter 3x: 다음
-          페이지 &nbsp;|&nbsp; {'>>'}:빈 페이지
-        </div>
-      </div>
 
-      {/* Page preview section */}
-      <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>페이지 미리보기</div>
-        <div style={previewListStyle}>
-          {parsedPages.length === 0 && (
-            <div style={emptyLabelStyle}>텍스트를 입력하면 페이지가 표시됩니다.</div>
-          )}
-          {parsedPages.map((page) => (
-            <div key={page.pageIndex} style={pageItemStyle(page.isEmpty)}>
-              <div style={pageNumberStyle}>
-                Page {page.pageIndex + 1}
+        <div style={s.help}>
+          빈 줄 2개 (엔터 3번) = 페이지 나눔 &nbsp;|&nbsp; 빈 줄 1개 = 새 텍스트 블록 &nbsp;|&nbsp; <code>{'>>'}</code> = 빈 페이지
+        </div>
+
+        {/* Inline page breakdown */}
+        {parsedPages.length > 1 && (
+          <div style={{ marginTop: 8, padding: 8, background: '#F8F9FA', borderRadius: 4, fontSize: 10, color: '#666', maxHeight: 120, overflowY: 'auto' }}>
+            {parsedPages.map((page) => (
+              <div key={page.pageIndex} style={{ padding: '2px 0', borderBottom: '1px solid #EEE' }}>
+                <strong style={{ color: '#18A0FB' }}>P{page.pageIndex + 1}</strong>
                 {page.isEmpty
-                  ? ''
-                  : ` (${page.textBlocks.length} block${page.textBlocks.length !== 1 ? 's' : ''})`}
+                  ? <span style={{ color: '#AAA', fontStyle: 'italic' }}> [빈 페이지]</span>
+                  : <span> {page.textBlocks.flat().join(' ').slice(0, 40)}{page.textBlocks.flat().join(' ').length > 40 ? '...' : ''}</span>
+                }
               </div>
-              {page.isEmpty ? (
-                <div style={emptyLabelStyle}>[빈 페이지 — 이미지 전용]</div>
-              ) : (
-                page.textBlocks.map((block, bIdx) => {
-                  const preview = block.join('\n');
-                  const truncated =
-                    preview.length > 50 ? preview.slice(0, 50) + '…' : preview;
-                  return (
-                    <div key={bIdx} style={blockPreviewStyle}>
-                      {bIdx > 0 && (
-                        <span
-                          style={{
-                            display: 'block',
-                            borderTop: '1px dotted #DDD',
-                            margin: '3px 0',
-                          }}
-                        />
-                      )}
-                      {truncated}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Footer */}
-      <div style={footerStyle}>
-        <span style={pageCountStyle}>총 {parsedPages.length} 페이지</span>
+      {/* Create in Figma button */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>총 {parsedPages.length} 페이지 ({nonEmptyPageCount} 내용)</span>
         <button
           type="button"
-          style={{
-            ...createBtnStyle,
-            ...(parsedPages.length === 0
-              ? { opacity: 0.5, cursor: 'not-allowed' }
-              : {}),
-          }}
+          style={{ ...s.btnPrimary, ...(parsedPages.length === 0 ? s.disabled : {}) }}
           onClick={handleCreatePages}
           disabled={parsedPages.length === 0}
         >

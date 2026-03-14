@@ -68,11 +68,13 @@ export function usePipelineImages(): UsePipelineImagesReturn {
 
   /**
    * Internal helper: generate multiple images with rate limiting and progress tracking.
+   * onImageReady callback fires as each image completes (real-time streaming).
    */
   const generateBatch = useCallback(
     async (
       apiKey: string,
       prompts: { prompt: string; refImage?: string; aspectRatio: string }[],
+      onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
       const total = prompts.length;
       setIsGenerating(true);
@@ -107,9 +109,11 @@ export function usePipelineImages(): UsePipelineImagesReturn {
               aspectRatio: item.aspectRatio,
             };
             results.push(img);
+            // Fire callback immediately when this image completes
+            onImageReady?.(img);
           } catch (err: any) {
             if (err instanceof RateLimitError) {
-              throw err; // let rate limiter handle retry
+              throw err;
             }
             if (err.name === 'AbortError' || err.message === 'Cancelled') {
               throw err;
@@ -148,12 +152,16 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       apiKey: string,
       styleDesc: string,
       count: number = 6,
+      customPrompt?: string,
+      onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
       const prompts = Array.from({ length: count }, (_, i) => ({
-        prompt: `동화 일러스트 레퍼런스 이미지를 생성해줘. 스타일: ${styleDesc}. 텍스트 없이 배경 이미지만 생성해줘. 변형 ${i + 1}/${count}.`,
+        prompt: customPrompt
+          ? `${customPrompt}. 스타일: ${styleDesc}. 텍스트 없이 배경 이미지만 생성해줘. 변형 ${i + 1}/${count}.`
+          : `동화 일러스트 레퍼런스 이미지를 생성해줘. 스타일: ${styleDesc}. 텍스트 없이 배경 이미지만 생성해줘. 변형 ${i + 1}/${count}.`,
         aspectRatio: '3:2',
       }));
-      return generateBatch(apiKey, prompts);
+      return generateBatch(apiKey, prompts, onImageReady);
     },
     [generateBatch],
   );
@@ -165,12 +173,13 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       character: { name: string; appearance: string },
       styleDesc: string,
       count: number = 4,
+      onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
       const prompts = Array.from({ length: count }, (_, i) => ({
         prompt: `동화 캐릭터 일러스트를 생성해줘. 캐릭터: ${character.name}. 외형: ${character.appearance}. 스타일: ${styleDesc}. 캐릭터의 전신 모습을 정면에서 그려줘. 텍스트 없이 캐릭터만 그려줘. 변형 ${i + 1}/${count}.`,
         aspectRatio: '1:1',
       }));
-      return generateBatch(apiKey, prompts);
+      return generateBatch(apiKey, prompts, onImageReady);
     },
     [generateBatch],
   );
@@ -184,6 +193,7 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       bgType: 'white' | 'full',
       refImageBase64?: string,
       count: number = 2,
+      onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
       const bgInstruction =
         bgType === 'white'
@@ -195,7 +205,7 @@ export function usePipelineImages(): UsePipelineImagesReturn {
         refImage: refImageBase64,
         aspectRatio: '3:4',
       }));
-      return generateBatch(apiKey, prompts);
+      return generateBatch(apiKey, prompts, onImageReady);
     },
     [generateBatch],
   );
@@ -208,13 +218,14 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       styleDesc: string,
       refImageBase64?: string,
       count: number = 2,
+      onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
       const prompts = Array.from({ length: count }, (_, i) => ({
         prompt: `흰 바탕 위에 "${expression}"을(를) 직관적으로 잘 나타내는 이미지를 그려줘. 스타일: ${styleDesc}. 텍스트 없이 이미지만 생성해줘. 변형 ${i + 1}/${count}.`,
         refImage: refImageBase64,
         aspectRatio: '3:2',
       }));
-      return generateBatch(apiKey, prompts);
+      return generateBatch(apiKey, prompts, onImageReady);
     },
     [generateBatch],
   );
