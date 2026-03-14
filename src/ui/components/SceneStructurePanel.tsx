@@ -148,6 +148,8 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
   const [analyzedCount, setAnalyzedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [reanalyzeSummary, setReanalyzeSummary] = useState<string | null>(null);
+  const [editingPage, setEditingPage] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<SceneAnalysis | null>(null);
 
   const nonEmptyPages = pages.filter((p) => !p.isEmpty);
 
@@ -324,6 +326,57 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
       });
     }
   }, [pages, characters]);
+
+  // --- Scene analysis edit handlers ---
+  const handleStartEdit = useCallback((pageIndex: number) => {
+    const page = pages.find(p => p.pageIndex === pageIndex);
+    if (page?.sceneAnalysis) {
+      setEditDraft(JSON.parse(JSON.stringify(page.sceneAnalysis)));
+      setEditingPage(pageIndex);
+    }
+  }, [pages]);
+
+  const handleSaveEdit = useCallback((pageIndex: number) => {
+    if (!editDraft) return;
+    const updated = pages.map(p =>
+      p.pageIndex === pageIndex ? { ...p, sceneAnalysis: editDraft } : p
+    );
+    onPagesUpdate(updated);
+    setEditingPage(null);
+    setEditDraft(null);
+  }, [editDraft, pages, onPagesUpdate]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingPage(null);
+    setEditDraft(null);
+  }, []);
+
+  const updateDraftField = useCallback((path: string, value: string) => {
+    setEditDraft(prev => {
+      if (!prev) return prev;
+      const draft = { ...prev };
+      if (path.startsWith('background.')) {
+        const key = path.split('.')[1] as keyof SceneAnalysis['background'];
+        draft.background = { ...draft.background, [key]: value };
+      } else if (path === 'imageSceneDescription') {
+        draft.imageSceneDescription = value;
+      } else if (path === 'sceneDescription') {
+        draft.sceneDescription = value;
+      } else if (path === 'characterNames') {
+        draft.characterNames = value.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return draft;
+    });
+  }, []);
+
+  const updateDraftAction = useCallback((charName: string, field: string, value: string) => {
+    setEditDraft(prev => {
+      if (!prev) return prev;
+      const actions = { ...prev.characterActions };
+      actions[charName] = { ...actions[charName], [field]: value };
+      return { ...prev, characterActions: actions };
+    });
+  }, []);
 
   // --- Styles ---
   const containerStyle: React.CSSProperties = {
@@ -515,18 +568,30 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
             <div key={page.pageIndex} style={pageCardStyle}>
               <div style={pageHeaderStyle}>
                 <span style={pageNumStyle}>Page {page.pageIndex + 1}</span>
-                <button
-                  type="button"
-                  style={btnOutlineStyle}
-                  onClick={() => handleReanalyze(page.pageIndex)}
-                >
-                  재분석
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {analysis && editingPage !== page.pageIndex && (
+                    <button
+                      type="button"
+                      style={{ ...btnOutlineStyle, color: '#F5A623', borderColor: '#F5A623' }}
+                      onClick={() => handleStartEdit(page.pageIndex)}
+                    >
+                      편집
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    style={btnOutlineStyle}
+                    onClick={() => handleReanalyze(page.pageIndex)}
+                  >
+                    재분석
+                  </button>
+                </div>
               </div>
 
               <div style={textPreviewStyle}>{getPageTextPreview(page)}</div>
 
-              {analysis && (
+              {/* Read-only display */}
+              {analysis && editingPage !== page.pageIndex && (
                 <>
                   {/* Character names with validation */}
                   <div style={tagContainerStyle}>
@@ -588,7 +653,88 @@ const SceneStructurePanel: React.FC<SceneStructurePanelProps> = ({
                 </>
               )}
 
-              {!analysis && (
+              {/* Edit mode */}
+              {editingPage === page.pageIndex && editDraft && (
+                <div style={{ padding: 8, background: '#FFF8E1', borderRadius: 6, border: '1px solid #FFE082', fontSize: 10 }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>장면 설명 (한국어)</div>
+                    <textarea
+                      value={editDraft.sceneDescription}
+                      onChange={(e) => updateDraftField('sceneDescription', e.target.value)}
+                      style={{ width: '100%', minHeight: 40, padding: 4, border: '1px solid #DDD', borderRadius: 3, fontSize: 10, resize: 'vertical', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>이미지 프롬프트 (영어)</div>
+                    <textarea
+                      value={editDraft.imageSceneDescription}
+                      onChange={(e) => updateDraftField('imageSceneDescription', e.target.value)}
+                      style={{ width: '100%', minHeight: 48, padding: 4, border: '1px solid #18A0FB', borderRadius: 3, fontSize: 10, resize: 'vertical', boxSizing: 'border-box', background: '#F0F8FF' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <div style={{ flex: 2 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>배경 (setting)</div>
+                      <input value={editDraft.background.setting} onChange={(e) => updateDraftField('background.setting', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>시간</div>
+                      <input value={editDraft.background.time} onChange={(e) => updateDraftField('background.time', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>분위기</div>
+                      <input value={editDraft.background.mood} onChange={(e) => updateDraftField('background.mood', e.target.value)}
+                        style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>배경 세부</div>
+                    <input value={editDraft.background.details} onChange={(e) => updateDraftField('background.details', e.target.value)}
+                      style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#555', marginBottom: 2 }}>등장인물 (쉼표로 구분)</div>
+                    <input value={editDraft.characterNames.join(', ')} onChange={(e) => updateDraftField('characterNames', e.target.value)}
+                      style={{ width: '100%', padding: '3px 4px', border: '1px solid #DDD', borderRadius: 3, fontSize: 10, boxSizing: 'border-box' }} />
+                  </div>
+
+                  {editDraft.characterNames.map((name) => {
+                    const action = editDraft.characterActions[name] || { action: '', expression: '', position: '' };
+                    return (
+                      <div key={name} style={{ marginBottom: 4, padding: 4, background: '#fff', borderRadius: 3, border: '1px solid #EEE' }}>
+                        <div style={{ fontWeight: 600, color: '#059669', marginBottom: 2 }}>{name}</div>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input placeholder="action" value={action.action} onChange={(e) => updateDraftAction(name, 'action', e.target.value)}
+                            style={{ flex: 2, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                          <input placeholder="expression" value={action.expression} onChange={(e) => updateDraftAction(name, 'expression', e.target.value)}
+                            style={{ flex: 1, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                          <input placeholder="position" value={action.position} onChange={(e) => updateDraftAction(name, 'position', e.target.value)}
+                            style={{ flex: 1, padding: '2px 4px', border: '1px solid #DDD', borderRadius: 2, fontSize: 9, boxSizing: 'border-box' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button type="button" onClick={() => handleSaveEdit(page.pageIndex)}
+                      style={{ flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 700, color: '#fff', background: '#18A0FB', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                      저장
+                    </button>
+                    <button type="button" onClick={handleCancelEdit}
+                      style={{ flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 600, color: '#666', background: '#fff', border: '1px solid #DDD', borderRadius: 4, cursor: 'pointer' }}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!analysis && editingPage !== page.pageIndex && (
                 <div style={{ fontSize: 11, color: '#AAA', fontStyle: 'italic' }}>
                   분석 결과 없음
                 </div>
