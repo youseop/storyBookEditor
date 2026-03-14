@@ -11,6 +11,7 @@ function buildImagePrompt(
   page: StoryPage,
   characters: Character[],
   bgType: 'white' | 'full',
+  styleDescription?: string,
 ): string {
   const analysis = page.sceneAnalysis;
   if (!analysis) return page.textBlocks.flat().join(' ');
@@ -40,6 +41,11 @@ function buildImagePrompt(
 
   const objectsPart = objects ? `Key objects: ${objects}. ` : '';
 
+  // Style instruction: use actual style description if available, otherwise generic reference
+  const styleInstruction = styleDescription
+    ? `Art style: ${styleDescription}. Match the exact style of the reference image provided.`
+    : `Draw in the exact same art style as the reference image provided.`;
+
   if (bgType === 'white') {
     return [
       `High-quality 4K children's book illustration, 1:1 square format.`,
@@ -47,7 +53,7 @@ function buildImagePrompt(
       `Clean pure white background, no environment or scenery.`,
       `Characters: ${charDescriptions}.`,
       objectsPart,
-      `Draw in the exact same art style as the reference image provided.`,
+      styleInstruction,
       `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
     ].filter(Boolean).join(' ');
   } else {
@@ -58,7 +64,7 @@ function buildImagePrompt(
       `Setting: ${bg.setting}. Time: ${bg.time}. Mood: ${bg.mood}. ${bg.details}`,
       `Characters: ${charDescriptions}.`,
       objectsPart,
-      `Draw in the exact same art style as the reference image provided.`,
+      styleInstruction,
       `No text, no letters, no words. Illustration only. Ultra-detailed, sharp, 4096x4096 resolution.`,
     ].filter(Boolean).join(' ');
   }
@@ -194,7 +200,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
         let firstImageId: string | null = null;
 
         for (const bgType of ['white', 'full'] as const) {
-          const scenePrompt = buildImagePrompt(page, characters, bgType);
+          const scenePrompt = buildImagePrompt(page, characters, bgType, styleDescription);
           try {
             const images = await generateSceneImages(
               apiKey,
@@ -422,7 +428,7 @@ const ImageBulkGenPanel: React.FC<ImageBulkGenPanelProps> = ({
       let firstImageId: string | null = null;
 
       for (const bgType of ['white', 'full'] as const) {
-        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, bgType);
+        const scenePrompt = state.customPrompt || buildImagePrompt(page, characters, bgType, styleDescription);
         try {
           const images = await generateSceneImages(
             apiKey,

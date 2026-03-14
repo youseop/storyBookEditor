@@ -202,7 +202,7 @@ export function usePipelineImages(): UsePipelineImagesReturn {
 
   // --- Scene images (Step 7) ---
   // Prompt is pre-built by buildImagePrompt() in ImageBulkGenPanel.
-  // This function just handles rate limiting, progress, and abort.
+  // styleDesc is appended here as a reinforcing system instruction for the model.
   const generateSceneImages = useCallback(
     async (
       apiKey: string,
@@ -213,8 +213,11 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       count: number = 2,
       onImageReady?: (img: GeneratedImage) => void,
     ): Promise<GeneratedImage[]> => {
+      const styleReminder = styleDesc
+        ? ` Follow this style guide strictly: ${styleDesc}.`
+        : '';
       const prompts = Array.from({ length: count }, (_, i) => ({
-        prompt: `${scenePrompt} Variation ${i + 1} of ${count}.`,
+        prompt: `${scenePrompt}${styleReminder} Variation ${i + 1} of ${count}.`,
         refImage: refImageBase64,
         aspectRatio: '1:1',
       }));
