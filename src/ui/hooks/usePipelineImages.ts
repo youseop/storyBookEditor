@@ -17,12 +17,16 @@ export interface UsePipelineImagesReturn {
     apiKey: string,
     styleDesc: string,
     count?: number,
+    customPrompt?: string,
+    onImageReady?: (img: GeneratedImage) => void,
   ) => Promise<GeneratedImage[]>;
   generateCharacterImages: (
     apiKey: string,
     character: { name: string; appearance: string },
     styleDesc: string,
     count?: number,
+    onImageReady?: (img: GeneratedImage) => void,
+    refImageBase64?: string,
   ) => Promise<GeneratedImage[]>;
   generateSceneImages: (
     apiKey: string,
@@ -31,6 +35,7 @@ export interface UsePipelineImagesReturn {
     bgType: 'white' | 'full',
     refImageBase64?: string,
     count?: number,
+    onImageReady?: (img: GeneratedImage) => void,
   ) => Promise<GeneratedImage[]>;
   generateKeyExprImages: (
     apiKey: string,
@@ -38,6 +43,15 @@ export interface UsePipelineImagesReturn {
     styleDesc: string,
     refImageBase64?: string,
     count?: number,
+    onImageReady?: (img: GeneratedImage) => void,
+  ) => Promise<GeneratedImage[]>;
+  generateCoverImages: (
+    apiKey: string,
+    coverPrompt: string,
+    styleDesc: string,
+    refImageBase64?: string,
+    count?: number,
+    onImageReady?: (img: GeneratedImage) => void,
   ) => Promise<GeneratedImage[]>;
   cancel: () => void;
   clearError: () => void;
@@ -174,9 +188,11 @@ export function usePipelineImages(): UsePipelineImagesReturn {
       styleDesc: string,
       count: number = 4,
       onImageReady?: (img: GeneratedImage) => void,
+      refImageBase64?: string,
     ): Promise<GeneratedImage[]> => {
       const prompts = Array.from({ length: count }, (_, i) => ({
-        prompt: `동화 캐릭터 일러스트를 생성해줘. 캐릭터: ${character.name}. 외형: ${character.appearance}. 스타일: ${styleDesc}. 캐릭터의 전신 모습을 정면에서 그려줘. 텍스트 없이 캐릭터만 그려줘. 변형 ${i + 1}/${count}.`,
+        prompt: `레퍼런스 이미지의 그림 스타일을 그대로 따라서 그려줘. 캐릭터: ${character.name}. 외형: ${character.appearance}. 스타일: ${styleDesc}. 깨끗한 흰색 배경 위에 캐릭터(인물/동물/의인화된 물건)의 전신 모습만 그려줘. 텍스트 없이 캐릭터만 그려줘. 변형 ${i + 1}/${count}.`,
+        refImage: refImageBase64,
         aspectRatio: '1:1',
       }));
       return generateBatch(apiKey, prompts, onImageReady);
@@ -230,6 +246,26 @@ export function usePipelineImages(): UsePipelineImagesReturn {
     [generateBatch],
   );
 
+  // --- Cover images (Step 18) ---
+  const generateCoverImages = useCallback(
+    async (
+      apiKey: string,
+      coverPrompt: string,
+      styleDesc: string,
+      refImageBase64?: string,
+      count: number = 4,
+      onImageReady?: (img: GeneratedImage) => void,
+    ): Promise<GeneratedImage[]> => {
+      const prompts = Array.from({ length: count }, (_, i) => ({
+        prompt: `동화책 표지 일러스트를 생성해줘. ${coverPrompt}. 스타일: ${styleDesc}. 텍스트 없이 이미지만 생성해줘. 가로로 넓은 비율. 변형 ${i + 1}/${count}.`,
+        refImage: refImageBase64,
+        aspectRatio: '2:1',
+      }));
+      return generateBatch(apiKey, prompts, onImageReady);
+    },
+    [generateBatch],
+  );
+
   return {
     isGenerating,
     progress,
@@ -238,6 +274,7 @@ export function usePipelineImages(): UsePipelineImagesReturn {
     generateCharacterImages,
     generateSceneImages,
     generateKeyExprImages,
+    generateCoverImages,
     cancel,
     clearError,
   };

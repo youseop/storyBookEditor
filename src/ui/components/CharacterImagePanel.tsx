@@ -10,6 +10,7 @@ interface CharacterImagePanelProps {
   onCharacterImageSelect: (characterId: string, imageBase64: string) => void;
   onCharactersChange?: (characters: Character[]) => void;
   styleDescription: string;
+  referenceImageBase64?: string;
   apiKey: string;
 }
 
@@ -18,6 +19,7 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
   onCharacterImageSelect,
   onCharactersChange,
   styleDescription,
+  referenceImageBase64,
   apiKey,
 }) => {
   // Per-character image list (append-only, newest first)
@@ -47,6 +49,17 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
       ...prev,
       [charId]: [img, ...(prev[charId] || [])],
     }));
+    // Save to gallery
+    const charName = characters.find(c => c.id === charId)?.name || 'Unknown';
+    const bytes = Uint8Array.from(atob(img.base64), c => c.charCodeAt(0));
+    postToPlugin({
+      type: 'SAVE_TO_GALLERY',
+      category: 'character',
+      imageId: img.id,
+      imageBytes: Array.from(bytes),
+      label: charName,
+      metadata: charId,
+    });
     // Auto-select first image for this character
     setSelectedIds(prev => {
       if (!prev[charId]) {
@@ -66,10 +79,10 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
     // Fire off all characters in parallel
     const promises = characters.map(char => {
       const data = getCharData(char);
-      return generateCharacterImages(apiKey, data, styleDescription, 4, makeImageReadyHandler(char.id));
+      return generateCharacterImages(apiKey, data, styleDescription, 4, makeImageReadyHandler(char.id), referenceImageBase64);
     });
     await Promise.allSettled(promises);
-  }, [apiKey, styleDescription, characters, generateCharacterImages, editedChars]);
+  }, [apiKey, styleDescription, characters, generateCharacterImages, editedChars, referenceImageBase64]);
 
   // Generate 2 more images for a single character
   const handleGenerateMore = useCallback(async (charId: string) => {
@@ -78,8 +91,8 @@ const CharacterImagePanel: React.FC<CharacterImagePanelProps> = ({
     const char = characters.find(c => c.id === charId);
     if (!char) return;
     const data = getCharData(char);
-    await generateCharacterImages(apiKey, data, styleDescription, 2, makeImageReadyHandler(charId));
-  }, [apiKey, styleDescription, characters, generateCharacterImages, editedChars]);
+    await generateCharacterImages(apiKey, data, styleDescription, 2, makeImageReadyHandler(charId), referenceImageBase64);
+  }, [apiKey, styleDescription, characters, generateCharacterImages, editedChars, referenceImageBase64]);
 
   const handleSelectImage = useCallback((charId: string, imageId: string) => {
     setSelectedIds(prev => ({ ...prev, [charId]: imageId }));
