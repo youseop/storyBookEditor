@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { ExpressionCard, ContentIdMap } from '../../shared/messageTypes';
+import type { ExpressionCard, ContentIdMap, CardTemplate } from '../../shared/messageTypes';
 import { DEFAULT_COL_SPAN, DEFAULT_ROW_SPAN } from '../../shared/constants';
 
 interface ParseResult {
@@ -16,6 +16,38 @@ interface ParseResult {
  */
 function normalizeText(lines: string[]): string {
   return lines.map(l => l.trim()).filter(l => l.length > 0).join('\n');
+}
+
+/**
+ * Detect card template from the first line of a card's text.
+ * Markers: @h → horizontal, @note → note, none → standard.
+ * Returns the template type and cleaned lines (marker stripped).
+ */
+function detectTemplate(lines: string[]): { template: CardTemplate; cleanLines: string[] } {
+  if (lines.length === 0) return { template: 'standard', cleanLines: lines };
+
+  const firstLine = lines[0];
+  if (firstLine.startsWith('@h ')) {
+    return {
+      template: 'horizontal',
+      cleanLines: [firstLine.slice(3), ...lines.slice(1)],
+    };
+  }
+  if (firstLine.startsWith('@note ')) {
+    return {
+      template: 'note',
+      cleanLines: [firstLine.slice(6), ...lines.slice(1)],
+    };
+  }
+  // Also support just "@h" or "@note" on first line with content on next lines
+  if (firstLine.trim() === '@h' && lines.length > 1) {
+    return { template: 'horizontal', cleanLines: lines.slice(1) };
+  }
+  if (firstLine.trim() === '@note' && lines.length > 1) {
+    return { template: 'note', cleanLines: lines.slice(1) };
+  }
+
+  return { template: 'standard', cleanLines: lines };
 }
 
 /**
@@ -94,7 +126,9 @@ export function useExpressionParser(
     const cards: ExpressionCard[] = [];
 
     for (let i = 0; i < parsed.length; i++) {
-      const normalizedKey = normalizeText(parsed[i].lines);
+      // Detect template marker from first line and clean it
+      const { template, cleanLines } = detectTemplate(parsed[i].lines);
+      const normalizedKey = normalizeText(cleanLines);
 
       let exprId: number;
       if (textToExprId.has(normalizedKey)) {
@@ -119,9 +153,10 @@ export function useExpressionParser(
 
       const card: ExpressionCard = {
         id: idStr,
-        lines: parsed[i].lines,
-        colSpan: DEFAULT_COL_SPAN,
+        lines: cleanLines,
+        colSpan: template === 'horizontal' ? DEFAULT_COL_SPAN * 2 : DEFAULT_COL_SPAN,
         rowSpan: DEFAULT_ROW_SPAN,
+        template,
       };
 
       if (parsed[i].rowBreakBefore) {

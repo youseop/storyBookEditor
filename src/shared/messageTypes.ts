@@ -19,6 +19,12 @@ export type ContentIdMap = Record<string, ContentIdMapEntry>;
 // Per-card image transform: cardId → transform (each card instance's own image position/size)
 export type CardTransformMap = Record<string, ImageTransform>;
 
+// Key Expression card template types
+export type CardTemplate = 'standard' | 'horizontal' | 'note';
+
+// Page layout for Part 3 (image:expression ratio)
+export type Part3PageLayout = 'layout-a' | 'layout-b' | 'layout-c' | 'layout-d';
+
 // Expression data after parsing
 export interface ExpressionCard {
   id: string;
@@ -27,6 +33,7 @@ export interface ExpressionCard {
   colSpan: number;       // grid cells wide (default 2)
   rowSpan: number;       // grid cells tall (default 2)
   rowBreakBefore?: boolean; // force new row (triple newline)
+  template?: CardTemplate;  // card template type (standard | horizontal | note)
 }
 
 // Settings from UI
@@ -400,6 +407,7 @@ export interface ApplyKeyExpressionsMessage {
   type: 'APPLY_KEY_EXPRESSIONS';
   expressions: Array<{
     pageIndex: number;
+    pageLayout: Part3PageLayout;
     cards: Array<ExpressionCard & { selectedImageIndex: number }>;
   }>;
 }

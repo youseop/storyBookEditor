@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { getPageTextPreview } from '../utils/geminiApi';
 import { useExpressionParser } from '../hooks/useExpressionParser';
 import { postToPlugin, usePluginMessage } from '../hooks/useFigmaMessages';
-import type { ExpressionCard, CardPlacement, ContentIdMap, SandboxToUIMessage, PluginSettings } from '../../shared/messageTypes';
+import type { ExpressionCard, CardPlacement, ContentIdMap, SandboxToUIMessage, PluginSettings, Part3PageLayout } from '../../shared/messageTypes';
 import { DEFAULT_BG_COLOR, DEFAULT_FONT_SIZE } from '../../shared/constants';
 import type { StoryPage } from '../../shared/pipeline';
 
@@ -23,6 +23,9 @@ interface KeyExprInputPanelProps {
   /** Per-page enLinesMap (pageIndex -> Map<expressionId, enLines>) */
   enLinesMaps: Record<number, Map<string, string[]>>;
   onEnLinesMapChange: (pageIndex: number, map: Map<string, string[]>) => void;
+  /** Per-page layout (pageIndex -> Part3PageLayout) */
+  pageLayouts?: Record<number, Part3PageLayout>;
+  onPageLayoutChange?: (pageIndex: number, layout: Part3PageLayout) => void;
 }
 
 /** Normalize text for contentIdMap keys (same logic as plugin side). */
@@ -52,6 +55,8 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
   onFrameIdChange,
   enLinesMaps,
   onEnLinesMapChange,
+  pageLayouts: externalPageLayouts,
+  onPageLayoutChange,
 }) => {
   const nonEmptyPages = useMemo(() => pages.filter((p) => !p.isEmpty), [pages]);
   const [selectedPageIndex, setSelectedPageIndex] = useState<number>(
@@ -60,6 +65,16 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
   const [rawTexts, setRawTexts] = useState<Record<number, string>>({});
   const [isGeneratingLayout, setIsGeneratingLayout] = useState(false);
   const [layoutGenerated, setLayoutGenerated] = useState<Record<number, boolean>>({});
+  const [internalPageLayouts, setInternalPageLayouts] = useState<Record<number, Part3PageLayout>>({});
+  const pageLayouts = externalPageLayouts ?? internalPageLayouts;
+
+  const handleLayoutChange = useCallback((pageIndex: number, layout: Part3PageLayout) => {
+    if (onPageLayoutChange) {
+      onPageLayoutChange(pageIndex, layout);
+    } else {
+      setInternalPageLayouts(prev => ({ ...prev, [pageIndex]: layout }));
+    }
+  }, [onPageLayoutChange]);
 
   const selectedPage = useMemo(
     () => pages.find((p) => p.pageIndex === selectedPageIndex),
@@ -423,6 +438,30 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
         </div>
       )}
 
+      {/* Page layout selector */}
+      <div style={sectionStyle}>
+        <div style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: '#666', marginRight: 8 }}>페이지 레이아웃:</span>
+          {(['layout-a', 'layout-b', 'layout-c', 'layout-d'] as Part3PageLayout[]).map(layout => (
+            <button
+              key={layout}
+              onClick={() => handleLayoutChange(selectedPageIndex, layout)}
+              style={{
+                padding: '4px 8px',
+                fontSize: 10,
+                marginRight: 4,
+                borderRadius: 4,
+                border: (pageLayouts[selectedPageIndex] || 'layout-a') === layout ? '2px solid #18A0FB' : '1px solid #DDD',
+                backgroundColor: (pageLayouts[selectedPageIndex] || 'layout-a') === layout ? '#E8F4FD' : '#FFF',
+                cursor: 'pointer',
+              }}
+            >
+              {layout === 'layout-a' ? '60:40' : layout === 'layout-b' ? '50:50' : layout === 'layout-c' ? '40:60' : '표현만'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Expression input */}
       <div style={sectionStyle}>
         <div style={labelStyle}>Key Expression 입력</div>
@@ -434,11 +473,13 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
             '핵심 표현을 입력하세요.\n\n' +
             'Enter = 카드 내 줄바꿈\n' +
             '빈 줄 (Enter 2번) = 새 카드 구분\n' +
-            '빈 줄 2개 (Enter 3번) = 새 줄 시작'
+            '빈 줄 2개 (Enter 3번) = 새 줄 시작\n\n' +
+            '@h = 가로형 카드\n' +
+            '@note = 노트 카드'
           }
         />
-        <div style={hintStyle}>
-          Enter = 카드 내 줄바꿈 | 빈 줄 = 새 카드 | 빈 줄 2개 = 새 줄 시작
+        <div style={{ fontSize: 10, color: '#999', marginTop: 4, lineHeight: 1.6 }}>
+          입력 가이드: 엔터 2번 = 새 카드 | <code>@h </code> 가로형 | <code>@note </code> 노트
         </div>
       </div>
 
@@ -453,6 +494,16 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
             <div key={card.id} style={cardPreviewStyle}>
               <div style={cardHeaderStyle}>
                 Card {idx + 1} (ID: {card.id})
+                {card.template === 'horizontal' && (
+                  <span style={{ color: '#18A0FB', marginLeft: 6, fontWeight: 600, fontSize: 9, background: '#E8F4FD', padding: '1px 4px', borderRadius: 3 }}>
+                    [가로]
+                  </span>
+                )}
+                {card.template === 'note' && (
+                  <span style={{ color: '#E68A00', marginLeft: 6, fontWeight: 600, fontSize: 9, background: '#FFF3D0', padding: '1px 4px', borderRadius: 3 }}>
+                    [노트]
+                  </span>
+                )}
                 {card.rowBreakBefore && (
                   <span style={{ color: '#F5A623', marginLeft: 6, fontWeight: 400, fontSize: 9 }}>
                     [줄바꿈]
@@ -462,6 +513,11 @@ const KeyExprInputPanel: React.FC<KeyExprInputPanelProps> = ({
               <div style={cardTextStyle}>{card.lines.join('\n')}</div>
               <div style={cardMetaStyle}>
                 {card.colSpan}x{card.rowSpan} | ID: {card.id}
+                {card.template && card.template !== 'standard' && (
+                  <span style={{ color: '#888', marginLeft: 4 }}>
+                    | {card.template}
+                  </span>
+                )}
                 {restoredEnMap.has(card.id) && (
                   <span style={{ color: '#18A0FB', marginLeft: 6 }}>
                     EN: {restoredEnMap.get(card.id)?.join(' ')}
