@@ -1629,7 +1629,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         const frame = figma.createFrame();
         frame.name = frameName;
         frame.x = META_AREA_X + 2700;
-        frame.y = META_AREA_Y;
+        frame.y = META_AREA_Y + 100;
         frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
         frame.locked = true;
         frame.cornerRadius = 16;
@@ -1706,7 +1706,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         const frame = figma.createFrame();
         frame.name = frameName;
         frame.x = META_AREA_X;
-        frame.y = META_AREA_Y;
+        frame.y = META_AREA_Y + 100;
         frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
         frame.locked = true;
         frame.cornerRadius = 16;
@@ -1769,7 +1769,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         const frame = figma.createFrame();
         frame.name = frameName;
         frame.x = META_AREA_X + 2700;
-        frame.y = 1200;
+        frame.y = 1300;
         frame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
         frame.locked = true;
         frame.cornerRadius = 16;
@@ -1847,7 +1847,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           targetFrame = figma.createFrame();
           targetFrame.name = charFrameName;
           targetFrame.x = META_AREA_X + 2700;
-          targetFrame.y = 1200;
+          targetFrame.y = 1300;
           targetFrame.fills = [{ type: 'SOLID', color: { r: 0.98, g: 0.98, b: 0.98 } }];
           targetFrame.locked = true;
           targetFrame.cornerRadius = 16;
@@ -2008,7 +2008,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
           storageFrame.resize(1000, 250);
           // Position in meta area (left side of canvas)
           storageFrame.x = META_AREA_X + 2700;
-          storageFrame.y = 2400 + msg.pageIndex * 400;
+          storageFrame.y = 2500 + msg.pageIndex * 400;
           storageFrame.fills = [{ type: 'SOLID', color: { r: 0.97, g: 0.97, b: 0.97 } }];
           storageFrame.setPluginData(PLUGIN_DATA_KEYS.nodeType, 'meta-page-images');
           storageFrame.setPluginData(PLUGIN_DATA_KEYS.pageIndex, String(msg.pageIndex));
