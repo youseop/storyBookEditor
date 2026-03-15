@@ -20,7 +20,6 @@ import {
   DEFAULT_FONT_FAMILY,
   PROGRESS_AREA_Y,
   SNAPSHOT_AREA_GAP,
-  PART_SEPARATOR_ROWS,
   PAGE_NUMBER_FONT_SIZE,
   PAGE_NUMBER_MARGIN,
   KEY_COLOR_A,
@@ -492,6 +491,20 @@ function getPartBottomY(partPrefix: string): number {
 }
 
 /**
+ * Find the right-most X + width of all frames matching a given part prefix.
+ */
+function getPartRightX(partPrefix: string): number {
+  let maxRight = 0;
+  figma.currentPage.children.forEach((n) => {
+    if (n.name.startsWith(partPrefix) && n.type === 'FRAME') {
+      const right = n.x + (n as FrameNode).width;
+      if (right > maxRight) maxRight = right;
+    }
+  });
+  return maxRight;
+}
+
+/**
  * Create Part 2 pages by cloning Part 1 pages and adding English text below Korean text.
  */
 async function createPart2Pages(
@@ -520,11 +533,10 @@ async function createPart2Pages(
 
   if (part1Frames.length === 0) return 0;
 
-  // Calculate position below Part 1 with separator gap
-  const part1Bottom = getPartBottomY('PK-Part1-Page');
-  const separatorGap =
-    PART_SEPARATOR_ROWS * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
-  const part2StartY = part1Bottom + separatorGap;
+  // Calculate position to the right of Part 1 with one page-width gap
+  const part1Right = getPartRightX('PK-Part1-Page');
+  const partGap = STORY_PAGE_WIDTH + PAGE_GAP_H;  // one page-width gap
+  const part2StartX = part1Right + partGap;
 
   // Build translation lookup map
   const translationMap = new Map<number, string[][]>();
@@ -541,10 +553,10 @@ async function createPart2Pages(
     const clone = part1Frame.clone();
     clone.name = FRAME_NAMES.part2Page(i);
 
-    // Reposition into Part 2 area
+    // Reposition into Part 2 area (to the right of Part 1)
     const pos = getPagePosition(i);
-    clone.x = pos.x;
-    clone.y = part2StartY + pos.y;
+    clone.x = part2StartX + pos.x;
+    clone.y = pos.y;  // Same Y row as Part 1
 
     // Store metadata
     clone.setPluginData(PLUGIN_DATA_KEYS.partType, 'part2');
@@ -624,13 +636,12 @@ async function createPart3Layout(colorA: string): Promise<number> {
 
   if (part1Frames.length === 0) return 0;
 
-  // Calculate position below Part 2 (or Part 1 if Part 2 doesn't exist)
-  const part2Bottom = getPartBottomY('PK-Part2-Page');
-  const part1Bottom = getPartBottomY('PK-Part1-Page');
-  const referenceBottom = part2Bottom > 0 ? part2Bottom : part1Bottom;
-  const separatorGap =
-    PART_SEPARATOR_ROWS * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
-  const part3StartY = referenceBottom + separatorGap;
+  // Calculate position to the right of Part 2 (or Part 1 if Part 2 doesn't exist)
+  const part2Right = getPartRightX('PK-Part2-Page');
+  const part1Right = getPartRightX('PK-Part1-Page');
+  const referenceRight = part2Right > 0 ? part2Right : part1Right;
+  const partGap = STORY_PAGE_WIDTH + PAGE_GAP_H;
+  const part3StartX = referenceRight + partGap;
 
   const bgColor = hexToFigmaColor(colorA || KEY_COLOR_A);
 
@@ -648,8 +659,8 @@ async function createPart3Layout(colorA: string): Promise<number> {
     const frame = figma.createFrame();
     frame.name = FRAME_NAMES.part3Page(i);
     frame.resize(STORY_PAGE_WIDTH, STORY_PAGE_HEIGHT);
-    frame.x = pos.x;
-    frame.y = part3StartY + pos.y;
+    frame.x = part3StartX + pos.x;
+    frame.y = pos.y;  // Same Y row as Part 1
     frame.fills = [{ type: 'SOLID', color: bgColor }];
 
     // Store metadata
@@ -951,13 +962,13 @@ async function createInnerPages(
   ) as FrameNode[];
   for (const f of existingInner) f.remove();
 
-  // Find the bottom Y position of the last part to position inner pages below
-  const part3Bottom = getPartBottomY('PK-Part3-Page');
-  const part2Bottom = getPartBottomY('PK-Part2-Page');
-  const part1Bottom = getPartBottomY('PK-Part1-Page');
-  const referenceBottom = Math.max(part3Bottom, part2Bottom, part1Bottom);
-  const separatorGap = PART_SEPARATOR_ROWS * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
-  const innerStartY = referenceBottom > 0 ? referenceBottom + separatorGap : 0;
+  // Find the right-most X position of the last part to position inner pages to the right
+  const part3Right = getPartRightX('PK-Part3-Page');
+  const part2Right = getPartRightX('PK-Part2-Page');
+  const part1Right = getPartRightX('PK-Part1-Page');
+  const referenceRight = Math.max(part3Right, part2Right, part1Right);
+  const innerPartGap = STORY_PAGE_WIDTH + PAGE_GAP_H;
+  const innerStartX = referenceRight > 0 ? referenceRight + innerPartGap : 0;
 
   const displayBookTitle = bookTitle || '';
   const displayBookTitleEn = bookTitleEn || 'Pronounce Korean';
@@ -969,11 +980,11 @@ async function createInnerPages(
     const template = INNER_PAGE_TEMPLATES[pageType];
     if (!template) continue;
 
-    // Calculate position (2 per row, like story pages)
+    // Calculate position (2 per row, to the right of the last part)
     const col = i % PAGES_PER_ROW;
     const row = Math.floor(i / PAGES_PER_ROW);
-    const x = col * (STORY_PAGE_WIDTH + PAGE_GAP_H);
-    const y = innerStartY + row * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
+    const x = innerStartX + col * (STORY_PAGE_WIDTH + PAGE_GAP_H);
+    const y = row * (STORY_PAGE_HEIGHT + PAGE_GAP_V);
 
     // Create the frame
     const frame = figma.createFrame();
