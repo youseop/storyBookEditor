@@ -9,12 +9,13 @@ import {
   DEFAULT_FONT_FAMILY,
 } from '../../shared/constants';
 import { FRAME_NAMES } from '../../shared/naming';
+import type { ApplyKeyExpressionsMessage } from '../../shared/messageTypes';
 
 /**
  * Apply key expression cards to Part 3 page frames.
  * Creates card layouts (standard, horizontal, note) within key-expr-area sub-frames.
  */
-export async function handleApplyKeyExpressions(msg: any): Promise<void> {
+export async function handleApplyKeyExpressions(msg: ApplyKeyExpressionsMessage): Promise<void> {
   try {
     // Layout ratios: how much of the page height is for key expressions
     const layoutRatios: Record<string, number> = {

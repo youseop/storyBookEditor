@@ -9,12 +9,21 @@ import {
   STORY_PAGE_HEIGHT,
   META_AREA_X,
   DEFAULT_FONT_FAMILY,
+  KEY_COLOR_A,
+  KEY_COLOR_B,
 } from '../../shared/constants';
+import type {
+  StoreSceneImageMessage,
+  SelectSceneImageMessage,
+  SaveImagePlacementMessage,
+  PlaceDialogueMessage,
+  LoadPageImagesMessage,
+} from '../../shared/messageTypes';
 
 /**
  * Store a scene image in a per-page storage frame on canvas.
  */
-export async function handleStoreSceneImage(msg: any): Promise<void> {
+export async function handleStoreSceneImage(msg: StoreSceneImageMessage): Promise<void> {
   const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
   let storageFrame = figma.currentPage.findOne(
     (n) => n.name === storageName && n.type === 'FRAME'
@@ -86,7 +95,7 @@ export async function handleStoreSceneImage(msg: any): Promise<void> {
 /**
  * Select a scene image variant and place it as the background of a Part 1 page.
  */
-export async function handleSelectSceneImage(msg: any): Promise<void> {
+export async function handleSelectSceneImage(msg: SelectSceneImageMessage): Promise<void> {
   const storageName = FRAME_NAMES.metaPageImages(msg.pageIndex);
   const storageFrame = figma.currentPage.findOne(
     (n) => n.name === storageName && n.type === 'FRAME'
@@ -155,7 +164,7 @@ export async function handleSelectSceneImage(msg: any): Promise<void> {
 /**
  * Save image placement data for multiple pages.
  */
-export async function handleSaveImagePlacement(msg: any): Promise<void> {
+export function handleSaveImagePlacement(msg: SaveImagePlacementMessage): void {
   for (const pageIndex of msg.pageIndices) {
     const pageName = FRAME_NAMES.part1Page(pageIndex);
     const pageFrame = figma.currentPage.findOne(
@@ -188,7 +197,7 @@ export async function handleSaveImagePlacement(msg: any): Promise<void> {
 /**
  * Place dialogue text blocks on a Part 1 page with the selected template style.
  */
-export async function handlePlaceDialogue(msg: any): Promise<void> {
+export async function handlePlaceDialogue(msg: PlaceDialogueMessage): Promise<void> {
   const frameName = FRAME_NAMES.part1Page(msg.pageIndex);
   const frame = figma.currentPage.findOne(
     (n) => n.name === frameName && n.type === 'FRAME'
@@ -238,7 +247,7 @@ export async function handlePlaceDialogue(msg: any): Promise<void> {
     const dialogueWidth = STORY_PAGE_WIDTH * 0.8;
 
     if (template === 'border-a' || template === 'border-b') {
-      const borderColor = hexToFigmaColor(template === 'border-a' ? '#FFCF66' : '#FFF69B');
+      const borderColor = hexToFigmaColor(template === 'border-a' ? KEY_COLOR_A : KEY_COLOR_B);
       dialogueGroup.strokes = [{ type: 'SOLID', color: borderColor }];
       dialogueGroup.strokeWeight = 8;
       dialogueGroup.cornerRadius = 24;
@@ -273,7 +282,7 @@ export async function handlePlaceDialogue(msg: any): Promise<void> {
 /**
  * Load all stored page images (thumbnails) and send them to the UI.
  */
-export async function handleLoadPageImages(msg: any): Promise<void> {
+export async function handleLoadPageImages(_msg: LoadPageImagesMessage): Promise<void> {
   const pageImageFrames = figma.currentPage.children.filter(
     (n) => n.name.startsWith('PK-Meta-Page') && n.name.endsWith('-Images') && n.type === 'FRAME'
   ) as FrameNode[];

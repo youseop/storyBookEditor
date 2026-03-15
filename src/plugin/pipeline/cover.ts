@@ -7,11 +7,12 @@ import {
   STORY_PAGE_WIDTH,
   STORY_PAGE_HEIGHT,
 } from '../../shared/constants';
+import type { CreateCoverMessage } from '../../shared/messageTypes';
 
 /**
  * Create a cover frame with background image and title overlay.
  */
-export async function handleCreateCover(msg: any): Promise<void> {
+export async function handleCreateCover(msg: CreateCoverMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 

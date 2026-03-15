@@ -309,7 +309,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
     case 'SAVE_KEY_COLORS': {
       try {
-        await handleSaveKeyColors(msg);
+        handleSaveKeyColors(msg);
       } catch (err: any) {
         figma.ui.postMessage({
           type: 'ERROR',
@@ -389,7 +389,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
 
     case 'SAVE_IMAGE_PLACEMENT': {
       try {
-        await handleSaveImagePlacement(msg);
+        handleSaveImagePlacement(msg);
       } catch (err: any) {
         figma.ui.postMessage({
           type: 'IMAGE_PLACEMENT_SAVED',
@@ -499,6 +499,7 @@ export async function handlePipelineMessage(msg: UIToSandboxMessage): Promise<bo
         figma.ui.postMessage({
           type: 'ERROR',
           message: `Frame not found: ${msg.frameName}`,
+          detail: `Frame not found: ${msg.frameName}`,
         });
       }
       return true;

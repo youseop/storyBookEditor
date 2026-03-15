@@ -12,6 +12,7 @@ import {
   findPipelineDataNode,
   savePipelineState,
 } from './statePersistence';
+import type { RestoreSnapshotMessage } from '../../shared/messageTypes';
 
 /**
  * Determine which Phase a step number belongs to and produce phase metadata.
@@ -191,7 +192,7 @@ export async function createSnapshot(
   if (pipelineDataNode) {
     const stateJson = pipelineDataNode.getPluginData(PLUGIN_DATA_KEYS.pipelineState);
     if (stateJson) {
-      snapshotFrame.setPluginData('pk-snapshot-state', stateJson);
+      snapshotFrame.setPluginData(PLUGIN_DATA_KEYS.snapshotState, stateJson);
     }
   }
 
@@ -253,7 +254,7 @@ export async function createSnapshot(
 /**
  * Restore pipeline state from a snapshot slot.
  */
-export async function handleRestoreSnapshot(msg: any): Promise<void> {
+export async function handleRestoreSnapshot(msg: RestoreSnapshotMessage): Promise<void> {
   const snapFrame = figma.currentPage.findOne(
     n => n.name === FRAME_NAMES.snapshotSlot(msg.slot)
   ) as FrameNode | null;
@@ -262,7 +263,7 @@ export async function handleRestoreSnapshot(msg: any): Promise<void> {
     throw new Error(`Snapshot slot ${msg.slot} not found`);
   }
 
-  const stateJson = snapFrame.getPluginData('pk-snapshot-state');
+  const stateJson = snapFrame.getPluginData(PLUGIN_DATA_KEYS.snapshotState);
   if (!stateJson) {
     throw new Error('Snapshot does not contain saved state');
   }

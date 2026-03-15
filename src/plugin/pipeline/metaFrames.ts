@@ -10,24 +10,33 @@ import {
   META_AREA_Y,
 } from '../../shared/constants';
 import { getOrCreatePipelineDataNode } from './statePersistence';
+import type {
+  SaveStyleGuideMessage,
+  SaveStoryTextMessage,
+  SaveCharactersMessage,
+  SaveCharacterImageMessage,
+  SaveKeyColorsMessage,
+  SaveSceneAnalysisMessage,
+  SaveBulkTranslationsMessage,
+} from '../../shared/messageTypes';
 
 /**
  * Save style guide description and optional reference image to a canvas frame.
  */
-export async function handleSaveStyleGuide(msg: any): Promise<void> {
+export async function handleSaveStyleGuide(msg: SaveStyleGuideMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
   const dataNode = getOrCreatePipelineDataNode();
-  if (msg.description) dataNode.setPluginData('pk-style-description', msg.description);
+  if (msg.description) dataNode.setPluginData(PLUGIN_DATA_KEYS.styleDescription, msg.description);
 
   let imageHash: string | undefined;
   if (msg.imageBytes && msg.imageBytes.length > 0) {
     const image = figma.createImage(new Uint8Array(msg.imageBytes));
     imageHash = image.hash;
-    dataNode.setPluginData('pk-style-image-hash', imageHash);
+    dataNode.setPluginData(PLUGIN_DATA_KEYS.styleImageHash, imageHash);
   } else {
-    imageHash = dataNode.getPluginData('pk-style-image-hash') || undefined;
+    imageHash = dataNode.getPluginData(PLUGIN_DATA_KEYS.styleImageHash) || undefined;
   }
 
   // Create/update visible frame on canvas
@@ -98,11 +107,11 @@ export async function handleSaveStyleGuide(msg: any): Promise<void> {
 /**
  * Save story text (title + body) to a visible meta frame on canvas.
  */
-export async function handleSaveStoryText(msg: any): Promise<void> {
+export async function handleSaveStoryText(msg: SaveStoryTextMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
-  const frameName = 'PK-Meta-StoryText';
+  const frameName = FRAME_NAMES.metaStoryText;
   const old = figma.currentPage.findOne(n => n.name === frameName) as FrameNode | null;
   if (old) old.remove();
 
@@ -151,7 +160,7 @@ export async function handleSaveStoryText(msg: any): Promise<void> {
 /**
  * Save character list data and create visible character cards on canvas.
  */
-export async function handleSaveCharacters(msg: any): Promise<void> {
+export async function handleSaveCharacters(msg: SaveCharactersMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
@@ -211,7 +220,7 @@ export async function handleSaveCharacters(msg: any): Promise<void> {
 /**
  * Save a character image to the Characters meta frame and persist the hash.
  */
-export async function handleSaveCharacterImage(msg: any): Promise<void> {
+export async function handleSaveCharacterImage(msg: SaveCharacterImageMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
 
   // Create/update the character's image in the Characters frame
@@ -227,10 +236,10 @@ export async function handleSaveCharacterImage(msg: any): Promise<void> {
 
   // Store in data node for persistence
   const dataNode = getOrCreatePipelineDataNode();
-  const existingData = dataNode.getPluginData('pk-character-images') || '{}';
+  const existingData = dataNode.getPluginData(PLUGIN_DATA_KEYS.characterImages) || '{}';
   const charImageMap = JSON.parse(existingData) as Record<string, string>;
   charImageMap[msg.characterId] = imageHash;
-  dataNode.setPluginData('pk-character-images', JSON.stringify(charImageMap));
+  dataNode.setPluginData(PLUGIN_DATA_KEYS.characterImages, JSON.stringify(charImageMap));
 
   // Find or create characters frame
   let targetFrame = charFrame;
@@ -274,16 +283,16 @@ export async function handleSaveCharacterImage(msg: any): Promise<void> {
 /**
  * Save key colors A and B to the pipeline data node.
  */
-export async function handleSaveKeyColors(msg: any): Promise<void> {
+export function handleSaveKeyColors(msg: SaveKeyColorsMessage): void {
   const dataNode = getOrCreatePipelineDataNode();
-  dataNode.setPluginData('pk-key-color-a', msg.colorA);
-  dataNode.setPluginData('pk-key-color-b', msg.colorB);
+  dataNode.setPluginData(PLUGIN_DATA_KEYS.keyColorA, msg.colorA);
+  dataNode.setPluginData(PLUGIN_DATA_KEYS.keyColorB, msg.colorB);
 }
 
 /**
  * Save scene analysis results to a visible meta frame on canvas.
  */
-export async function handleSaveSceneAnalysis(msg: any): Promise<void> {
+export async function handleSaveSceneAnalysis(msg: SaveSceneAnalysisMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
@@ -309,9 +318,8 @@ export async function handleSaveSceneAnalysis(msg: any): Promise<void> {
   frame.appendChild(title);
 
   let yPos = 100;
-  const m = msg as any;
 
-  for (const page of m.pages) {
+  for (const page of msg.pages) {
     // Page header
     const pageHeader = figma.createText();
     pageHeader.fontName = { family: 'Inter', style: 'Bold' };
@@ -325,7 +333,7 @@ export async function handleSaveSceneAnalysis(msg: any): Promise<void> {
 
     // Characters
     const charNames = page.characters
-      .map((ch: any) => `${m.characterNames[ch.characterId] || ch.characterId}: ${ch.action}`)
+      .map((ch) => `${msg.characterNames[ch.characterId] || ch.characterId}: ${ch.action}`)
       .join(', ');
     const charText = figma.createText();
     charText.fontName = { family: 'Inter', style: 'Regular' };
@@ -385,7 +393,7 @@ export async function handleSaveSceneAnalysis(msg: any): Promise<void> {
 /**
  * Save bulk translations to a visible meta frame showing KO/EN parallel text.
  */
-export async function handleSaveBulkTranslations(msg: any): Promise<void> {
+export async function handleSaveBulkTranslations(msg: SaveBulkTranslationsMessage): Promise<void> {
   await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
   await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
 
@@ -411,9 +419,8 @@ export async function handleSaveBulkTranslations(msg: any): Promise<void> {
   frame.appendChild(title);
 
   let yPos = 100;
-  const m = msg as any;
 
-  for (const page of m.pages) {
+  for (const page of msg.pages) {
     // Page header
     const pageHeader = figma.createText();
     pageHeader.fontName = { family: 'Inter', style: 'Bold' };

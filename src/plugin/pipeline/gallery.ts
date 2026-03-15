@@ -5,11 +5,12 @@
 import { FRAME_NAMES, PLUGIN_DATA_KEYS } from '../../shared/naming';
 import { META_AREA_X } from '../../shared/constants';
 import { getOrCreatePipelineDataNode } from './statePersistence';
+import type { SaveToGalleryMessage, LoadGalleryMessage } from '../../shared/messageTypes';
 
 /**
  * Save an image to the gallery under a specific category with dedup by imageId.
  */
-export async function handleSaveToGallery(msg: any): Promise<boolean> {
+export async function handleSaveToGallery(msg: SaveToGalleryMessage): Promise<boolean> {
   const galleryName = FRAME_NAMES.imageGallery;
   let gallery = figma.currentPage.findOne(
     n => n.name === galleryName && n.type === 'FRAME'
@@ -155,7 +156,7 @@ export async function handleSaveToGallery(msg: any): Promise<boolean> {
 /**
  * Load gallery data from the pipeline data node and send to UI.
  */
-export async function handleLoadGallery(msg: any): Promise<void> {
+export async function handleLoadGallery(_msg: LoadGalleryMessage): Promise<void> {
   const dataNode = getOrCreatePipelineDataNode();
   const galleryDataRaw = dataNode.getPluginData(PLUGIN_DATA_KEYS.imageGalleryData) || '[]';
   const galleryData = JSON.parse(galleryDataRaw) as Array<{ category: string; imageId: string; label: string; metadata?: string }>;

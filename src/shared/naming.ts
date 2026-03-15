@@ -11,6 +11,7 @@ export const FRAME_NAMES = {
   part3Page: (pageIdx: number) => `PK-Part3-Page${String(pageIdx + 1).padStart(2, '0')}`,
   snapshotSlot: (slot: number) => `PK-Snapshot-Slot${slot}`,
   metaSceneAnalysis: 'PK-Meta-SceneAnalysis',
+  metaStoryText: 'PK-Meta-StoryText',
   metaTranslations: 'PK-Meta-Translations',
   imageGallery: 'PK-Image-Gallery',
   storage: '[KeyExpr] Storage',  // backward compatible
@@ -29,6 +30,12 @@ export const PLUGIN_DATA_KEYS = {
   snapshotLabel: 'pk-snapshot-label',
   snapshotTimestamp: 'pk-snapshot-timestamp',
   imageGalleryData: 'pk-image-gallery-data',
+  styleDescription: 'pk-style-description',
+  styleImageHash: 'pk-style-image-hash',
+  characterImages: 'pk-character-images',
+  keyColorA: 'pk-key-color-a',
+  keyColorB: 'pk-key-color-b',
+  snapshotState: 'pk-snapshot-state',
 } as const;
 
 // Node type identifiers stored in pluginData
