@@ -2,7 +2,7 @@ import { createMainFrame, hexToFigmaColor } from './frameBuilder';
 import { buildCardGrid, applyCardLayout } from './cardGridBuilder';
 import { createStorageFrame, storeImage, assignImage, assignImageToAllCards, swapImage } from './imageManager';
 import { exportRefFrame } from './exportHelper';
-import { handlePipelineMessage } from './pipelineHandler';
+import { handlePipelineMessage } from './pipeline';
 import type {
   UIToSandboxMessage,
   PluginSettings,
