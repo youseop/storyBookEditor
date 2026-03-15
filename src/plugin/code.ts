@@ -1442,9 +1442,6 @@ async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
         // Read existing content→ID mapping (read-only, no write on layout)
         const contentIdMap = readContentIdMap();
 
-        // Scroll into view
-        figma.viewport.scrollAndZoomIntoView([mainFrame]);
-
         figma.ui.postMessage({
           type: 'LAYOUT_CREATED',
           placements,
@@ -1487,9 +1484,6 @@ async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
 
         // Read existing content→ID mapping (read-only, no write on layout)
         const contentIdMap = readContentIdMap();
-
-        // Scroll into view
-        figma.viewport.scrollAndZoomIntoView([mainFrame]);
 
         figma.ui.postMessage({
           type: 'LAYOUT_CREATED',
@@ -1812,14 +1806,32 @@ async function handleMessage(msg: UIToSandboxMessage): Promise<void> {
 
         // Create new frame directly below the lowest, matching its x position
         var newFrame = await createMainFrame(settings);
-        newFrame.y = lowestBottom + 200;
-        if (lowestFrame) {
-          newFrame.x = lowestFrame.x;
+
+        // Prefer positioning near Part 3 pages if they exist
+        var part3Frames = figma.currentPage.findAll(
+          function(n) { return n.type === 'FRAME' && n.name.startsWith('PK-Part3-Page'); }
+        ) as FrameNode[];
+        if (part3Frames.length > 0) {
+          // Find the bottom of Part 3 area
+          var part3Bottom = 0;
+          var part3MinX = Infinity;
+          for (var pi = 0; pi < part3Frames.length; pi++) {
+            var pb = part3Frames[pi].y + part3Frames[pi].height;
+            if (pb > part3Bottom) part3Bottom = pb;
+            if (part3Frames[pi].x < part3MinX) part3MinX = part3Frames[pi].x;
+          }
+          // Position below Part 3, use the lowest of Part 3 bottom and existing KeyExpr bottom
+          newFrame.y = Math.max(part3Bottom, lowestBottom) + 200;
+          newFrame.x = part3MinX;
+        } else {
+          newFrame.y = lowestBottom + 200;
+          if (lowestFrame) {
+            newFrame.x = lowestFrame.x;
+          }
         }
 
         // Auto-select the new frame
         figma.currentPage.selection = [newFrame];
-        figma.viewport.scrollAndZoomIntoView([newFrame]);
 
         figma.ui.postMessage({
           type: 'NEW_PAGE_CREATED',
