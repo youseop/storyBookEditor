@@ -156,8 +156,6 @@ export async function handleSelectSceneImage(msg: any): Promise<void> {
  * Save image placement data for multiple pages.
  */
 export async function handleSaveImagePlacement(msg: any): Promise<void> {
-  const placements: Array<{ pageIndex: number; x: number; y: number; width: number; height: number }> = [];
-
   for (const pageIndex of msg.pageIndices) {
     const pageName = FRAME_NAMES.part1Page(pageIndex);
     const pageFrame = figma.currentPage.findOne(
@@ -171,16 +169,13 @@ export async function handleSaveImagePlacement(msg: any): Promise<void> {
     ) as RectangleNode | null;
 
     if (sceneImg) {
-      const placement = {
+      pageFrame.setPluginData('imagePlacement', JSON.stringify({
         pageIndex,
         x: sceneImg.x,
         y: sceneImg.y,
         width: sceneImg.width,
         height: sceneImg.height,
-      };
-      placements.push(placement);
-      // Save placement data directly on the page frame
-      pageFrame.setPluginData('imagePlacement', JSON.stringify(placement));
+      }));
     }
   }
 

@@ -10,7 +10,6 @@ import {
 } from '../../shared/constants';
 import {
   findPipelineDataNode,
-  getOrCreatePipelineDataNode,
   savePipelineState,
 } from './statePersistence';
 

@@ -3,7 +3,6 @@
  */
 
 import { hasFullBleedImage } from './canvasHelpers';
-import { FRAME_NAMES } from '../../shared/naming';
 import {
   STORY_PAGE_WIDTH,
   STORY_PAGE_HEIGHT,
